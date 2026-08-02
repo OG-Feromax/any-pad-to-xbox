@@ -1,0 +1,37 @@
+{
+  "image_size": [720, 480],
+  "regions": {
+    "lt":      {"type": "axis",   "shape": "rect", "x": 0.275, "y": 0.100, "w": 0.122, "h": 0.058},
+    "rt":      {"type": "axis",   "shape": "rect", "x": 0.603, "y": 0.100, "w": 0.122, "h": 0.058},
+    "lb":      {"type": "button", "shape": "rect", "x": 0.261, "y": 0.171, "w": 0.150, "h": 0.054},
+    "rb":      {"type": "button", "shape": "rect", "x": 0.589, "y": 0.171, "w": 0.150, "h": 0.054},
+    "guide":   {"type": "button", "shape": "ellipse", "cx": 0.500, "cy": 0.350, "rx": 0.036, "ry": 0.054},
+    "back":    {"type": "button", "shape": "ellipse", "cx": 0.406, "cy": 0.354, "rx": 0.025, "ry": 0.025},
+    "start":   {"type": "button", "shape": "ellipse", "cx": 0.594, "cy": 0.354, "rx": 0.025, "ry": 0.025},
+    "y":       {"type": "button", "shape": "ellipse", "cx": 0.757, "cy": 0.413, "rx": 0.028, "ry": 0.042},
+    "a":       {"type": "button", "shape": "ellipse", "cx": 0.757, "cy": 0.563, "rx": 0.028, "ry": 0.042},
+    "x":       {"type": "button", "shape": "ellipse", "cx": 0.707, "cy": 0.488, "rx": 0.028, "ry": 0.042},
+    "b":       {"type": "button", "shape": "ellipse", "cx": 0.807, "cy": 0.488, "rx": 0.028, "ry": 0.042},
+    "tl":      {"type": "button", "shape": "ellipse", "cx": 0.319, "cy": 0.521, "rx": 0.047, "ry": 0.071},
+    "tr":      {"type": "button", "shape": "ellipse", "cx": 0.632, "cy": 0.625, "rx": 0.047, "ry": 0.071},
+    "x1":      {"type": "axis", "shape": "ellipse", "cx": 0.319, "cy": 0.521, "rx": 0.067, "ry": 0.100, "pair": "y1"},
+    "y1":      {"type": "axis", "shape": "ellipse", "cx": 0.319, "cy": 0.521, "rx": 0.067, "ry": 0.100, "pair": "x1"},
+    "x2":      {"type": "axis", "shape": "ellipse", "cx": 0.632, "cy": 0.625, "rx": 0.067, "ry": 0.100, "pair": "y2"},
+    "y2":      {"type": "axis", "shape": "ellipse", "cx": 0.632, "cy": 0.625, "rx": 0.067, "ry": 0.100, "pair": "x2"},
+    "du":      {"type": "button", "shape": "rect", "x": 0.413, "y": 0.569, "w": 0.025, "h": 0.042},
+    "dd":      {"type": "button", "shape": "rect", "x": 0.413, "y": 0.669, "w": 0.025, "h": 0.042},
+    "dl":      {"type": "button", "shape": "rect", "x": 0.378, "y": 0.621, "w": 0.028, "h": 0.038},
+    "dr":      {"type": "button", "shape": "rect", "x": 0.444, "y": 0.621, "w": 0.028, "h": 0.038},
+    "dpad_x":  {"type": "axis", "shape": "rect", "x": 0.371, "y": 0.558, "w": 0.108, "h": 0.163, "pair": "dpad_y"},
+    "dpad_y":  {"type": "axis", "shape": "rect", "x": 0.371, "y": 0.558, "w": 0.108, "h": 0.163, "pair": "dpad_x"}
+  },
+  "labels": {
+    "a": "A", "b": "B", "x": "X", "y": "Y",
+    "lb": "LB", "rb": "RB", "lt": "LT", "rt": "RT",
+    "back": "Back", "start": "Start", "guide": "Guide",
+    "tl": "L3", "tr": "R3",
+    "du": "D-pad ↑", "dd": "D-pad ↓", "dl": "D-pad ←", "dr": "D-pad →",
+    "x1": "LS X", "y1": "LS Y", "x2": "RS X", "y2": "RS Y",
+    "dpad_x": "D-pad X", "dpad_y": "D-pad Y"
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "require_remote_access": false,
+  "profiles": {
+    "0079:0006": {
+      "name": "DragonRise Fliperama",
+      "enabled": true,
+      "slot": 1,
+      "evdev_keymap": {
+        "BTN_TOP": "x",
+        "BTN_TRIGGER": "y",
+        "BTN_THUMB2": "rb",
+        "BTN_THUMB": "a",
+        "BTN_BASE3": "back",
+        "BTN_BASE4": "start",
+        "BTN_BASE": "lb",
+        "BTN_BASE2": "b",
+        "BTN_TOP2": "lt",
+        "BTN_PINKIE": "rt"
+      },
+      "evdev_absmap": {
+        "ABS_X": "dpad_x",
+        "ABS_Y": "dpad_y"
+      },
+      "axismap": ["-Y1=Y1", "-Y2=Y2"],
+      "extra_opts": []
+    },
+    "0810:0001": {
+      "name": "USB Gamepad",
+      "enabled": true,
+      "slot": 2,
+      "evdev_keymap": {
+        "BTN_BASE3": "back",
+        "BTN_BASE4": "start",
+        "BTN_THUMB2": "a",
+        "BTN_THUMB": "b",
+        "BTN_TOP": "x",
+        "BTN_TRIGGER": "y",
+        "BTN_TOP2": "lb",
+        "BTN_PINKIE": "rb"
+      },
+      "evdev_absmap": {
+        "ABS_X": "dpad_x",
+        "ABS_Y": "dpad_y"
+      },
+      "axismap": ["-Y1=Y1", "-Y2=Y2"],
+      "extra_opts": []
+    },
+    "1b4f:9206": {
+      "name": "SparkFun Pro Micro",
+      "enabled": true,
+      "slot": 3,
+      "evdev_keymap": {
+        "BTN_9": "start",
+        "BTN_0": "b",
+        "BTN_1": "a",
+        "BTN_6": "lb",
+        "BTN_7": "rb",
+        "BTN_8": "rt",
+        "BTN_4": "du",
+        "BTN_2": "dl",
+        "BTN_3": "dd",
+        "BTN_5": "dr"
+      },
+      "evdev_absmap": {
+        "ABS_X": "x1",
+        "ABS_Y": "y1",
+        "ABS_RX": "x2",
+        "ABS_RY": "y2"
+      },
+      "axismap": [],
+      "extra_opts": ["--trigger-as-button", "--dpad-as-button"]
+    }
+  }
+}

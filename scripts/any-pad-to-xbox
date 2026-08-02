@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Launcher: ensure uv exists, sync deps, run the UI.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+export PATH="${HOME}/.local/bin:${PATH}"
+
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "uv not found — installing via Astral install script..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="${HOME}/.local/bin:${PATH}"
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "Failed to install uv. Install manually: https://docs.astral.sh/uv/" >&2
+    exit 1
+  fi
+}
+
+ensure_uv
+uv sync
+exec uv run any-pad-to-xbox "$@"

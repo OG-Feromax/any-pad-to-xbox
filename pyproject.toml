@@ -1,0 +1,33 @@
+[project]
+name = "any-pad-to-xbox"
+version = "0.1.0"
+description = "Map generic joysticks to virtual Xbox 360 pads on Arch Linux"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Feromax", email = "feromax@hotmail.com" }]
+dependencies = [
+    "PySide6>=6.6",
+    "evdev>=1.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/OG-Feromax/any-pad-to-xbox"
+Repository = "https://github.com/OG-Feromax/any-pad-to-xbox"
+Issues = "https://github.com/OG-Feromax/any-pad-to-xbox/issues"
+
+[project.scripts]
+any-pad-to-xbox = "any_pad_to_xbox.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/any_pad_to_xbox"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"assets" = "any_pad_to_xbox/assets"
+
+[tool.uv]
+package = true

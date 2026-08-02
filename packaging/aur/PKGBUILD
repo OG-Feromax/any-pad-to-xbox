@@ -1,0 +1,58 @@
+# Maintainer: Feromax <feromax@hotmail.com>
+pkgname=any-pad-to-xbox-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc="Map generic USB joysticks to virtual Xbox 360 pads (GUI + mash-safe uinput bridge)"
+arch=('any')
+url="https://github.com/OG-Feromax/any-pad-to-xbox"
+license=('MIT')
+depends=(
+  'python'
+  'pyside6'
+  'python-evdev'
+)
+makedepends=('git' 'python-build' 'python-installer' 'python-wheel' 'python-hatchling')
+provides=('any-pad-to-xbox')
+conflicts=('any-pad-to-xbox')
+source=("git+${url}.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd any-pad-to-xbox
+  local ver
+  ver="$(git describe --long --tags 2>/dev/null || true)"
+  if [[ -n "$ver" ]]; then
+    ver="${ver#v}"
+    printf '%s' "${ver//-/.}"
+  else
+    printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+  fi
+}
+
+build() {
+  cd any-pad-to-xbox
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd any-pad-to-xbox
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # System bridge + hotplug runner (paths expected by the app today)
+  install -Dm755 packaging/xboxdrv_runner.py \
+    "$pkgdir/usr/local/bin/any-pad-to-xbox-runner"
+  install -Dm755 packaging/xpad_bridge.py \
+    "$pkgdir/usr/local/lib/any-pad-to-xbox/xpad_bridge.py"
+  install -Dm644 packaging/xboxdrv@.service \
+    "$pkgdir/etc/systemd/system/xboxdrv@.service"
+
+  install -Dm644 packaging/any-pad-to-xbox.desktop \
+    "$pkgdir/usr/share/applications/any-pad-to-xbox.desktop"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  install -d "$pkgdir/etc/any-pad-to-xbox"
+  if [[ -f data/profiles.example.json ]]; then
+    install -Dm644 data/profiles.example.json \
+      "$pkgdir/usr/share/doc/$pkgname/profiles.example.json"
+  fi
+}

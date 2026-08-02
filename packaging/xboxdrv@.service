@@ -1,0 +1,15 @@
+[Unit]
+Description=Any Pad to Xbox bridge for %I
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/any-pad-to-xbox-runner %i
+Restart=on-failure
+RestartSec=2
+User=root
+# Fighting-game mash: keep scheduling responsive under load
+Nice=-10
+
+[Install]
+WantedBy=multi-user.target

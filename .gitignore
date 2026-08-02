@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.python-version
+*.pkg.tar.zst
+src/any-pad-to-xbox/pkg/
+packaging/aur/pkg/
+packaging/aur/src/
+packaging/aur/*.tar.gz

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Any Pad to Xbox
+Comment=Map generic joysticks to virtual Xbox 360 controllers
+Exec=any-pad-to-xbox
+Icon=input-gaming
+Terminal=false
+Type=Application
+Categories=Game;Utility;
+StartupNotify=true
+Keywords=gamepad;joystick;xbox;controller;fliperama;

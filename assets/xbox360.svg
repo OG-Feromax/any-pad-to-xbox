@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4a4d52"/>
+      <stop offset="55%" stop-color="#2f3238"/>
+      <stop offset="100%" stop-color="#1c1e22"/>
+    </linearGradient>
+    <linearGradient id="grip" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a3d42"/>
+      <stop offset="100%" stop-color="#181a1e"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#35383e"/>
+      <stop offset="100%" stop-color="#22252a"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+    <filter id="btnGlow">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Ambient -->
+  <rect width="720" height="480" fill="#12141a"/>
+  <ellipse cx="360" cy="430" rx="220" ry="18" fill="#000" opacity="0.35"/>
+
+  <!-- Left grip -->
+  <path d="M110 210 C70 250, 55 310, 75 370 C95 430, 150 455, 195 430 C220 415, 235 370, 240 320 C245 270, 230 230, 200 210 Z"
+        fill="url(#grip)" stroke="#0e1014" stroke-width="3" filter="url(#soft)"/>
+  <!-- Right grip -->
+  <path d="M610 210 C650 250, 665 310, 645 370 C625 430, 570 455, 525 430 C500 415, 485 370, 480 320 C475 270, 490 230, 520 210 Z"
+        fill="url(#grip)" stroke="#0e1014" stroke-width="3" filter="url(#soft)"/>
+
+  <!-- Main body -->
+  <path d="M150 145
+           C210 95, 290 80, 360 80
+           C430 80, 510 95, 570 145
+           C620 180, 640 230, 630 280
+           C615 340, 560 360, 500 350
+           C455 342, 420 360, 360 360
+           C300 360, 265 342, 220 350
+           C160 360, 105 340, 90 280
+           C80 230, 100 180, 150 145 Z"
+        fill="url(#shell)" stroke="#0a0c10" stroke-width="3" filter="url(#soft)"/>
+
+  <!-- Upper deck -->
+  <path d="M190 150 C250 115, 310 105, 360 105 C410 105, 470 115, 530 150
+           C545 160, 545 185, 530 195 C470 225, 410 235, 360 235
+           C310 235, 250 225, 190 195 C175 185, 175 160, 190 150 Z"
+        fill="url(#face)" stroke="#15171c" stroke-width="2"/>
+
+  <!-- Triggers (back) -->
+  <rect x="198" y="48" width="88" height="28" rx="10" fill="#1a1c21" stroke="#0a0c10" stroke-width="2"/>
+  <rect x="434" y="48" width="88" height="28" rx="10" fill="#1a1c21" stroke="#0a0c10" stroke-width="2"/>
+  <text x="242" y="67" text-anchor="middle" fill="#8b909a" font-family="Segoe UI, Ubuntu, sans-serif" font-size="13" font-weight="700">LT</text>
+  <text x="478" y="67" text-anchor="middle" fill="#8b909a" font-family="Segoe UI, Ubuntu, sans-serif" font-size="13" font-weight="700">RT</text>
+
+  <!-- Bumpers -->
+  <rect x="188" y="82" width="108" height="26" rx="9" fill="#2a2d33" stroke="#101218" stroke-width="2"/>
+  <rect x="424" y="82" width="108" height="26" rx="9" fill="#2a2d33" stroke="#101218" stroke-width="2"/>
+  <text x="242" y="100" text-anchor="middle" fill="#c4c8d0" font-family="Segoe UI, Ubuntu, sans-serif" font-size="13" font-weight="700">LB</text>
+  <text x="478" y="100" text-anchor="middle" fill="#c4c8d0" font-family="Segoe UI, Ubuntu, sans-serif" font-size="13" font-weight="700">RB</text>
+
+  <!-- Guide -->
+  <circle cx="360" cy="168" r="26" fill="#1f5c2e" stroke="#0f2f18" stroke-width="3" filter="url(#btnGlow)"/>
+  <circle cx="360" cy="168" r="16" fill="#2f8a45"/>
+  <text x="360" y="174" text-anchor="middle" fill="#d8ffe0" font-family="Segoe UI, Ubuntu, sans-serif" font-size="16" font-weight="800">X</text>
+
+  <!-- Back / Start -->
+  <ellipse cx="292" cy="170" rx="18" ry="12" fill="#23262c" stroke="#0e1014" stroke-width="2"/>
+  <text x="292" y="174" text-anchor="middle" fill="#9aa0aa" font-family="Segoe UI, Ubuntu, sans-serif" font-size="9" font-weight="600">BACK</text>
+  <ellipse cx="428" cy="170" rx="18" ry="12" fill="#23262c" stroke="#0e1014" stroke-width="2"/>
+  <text x="428" y="174" text-anchor="middle" fill="#9aa0aa" font-family="Segoe UI, Ubuntu, sans-serif" font-size="9" font-weight="600">START</text>
+
+  <!-- Left stick -->
+  <circle cx="230" cy="250" r="48" fill="#15171c" stroke="#0a0c10" stroke-width="3"/>
+  <circle cx="230" cy="250" r="34" fill="#2c3036" stroke="#1a1c21" stroke-width="2"/>
+  <circle cx="230" cy="250" r="14" fill="#3a3f46"/>
+  <text x="230" y="312" text-anchor="middle" fill="#6b7280" font-family="Segoe UI, Ubuntu, sans-serif" font-size="11">LS / L3</text>
+
+  <!-- Right stick -->
+  <circle cx="455" cy="300" r="48" fill="#15171c" stroke="#0a0c10" stroke-width="3"/>
+  <circle cx="455" cy="300" r="34" fill="#2c3036" stroke="#1a1c21" stroke-width="2"/>
+  <circle cx="455" cy="300" r="14" fill="#3a3f46"/>
+  <text x="455" y="362" text-anchor="middle" fill="#6b7280" font-family="Segoe UI, Ubuntu, sans-serif" font-size="11">RS / R3</text>
+
+  <!-- D-pad -->
+  <g>
+    <rect x="292" y="268" width="28" height="78" rx="6" fill="#1a1c21" stroke="#0a0c10" stroke-width="2"/>
+    <rect x="267" y="293" width="78" height="28" rx="6" fill="#1a1c21" stroke="#0a0c10" stroke-width="2"/>
+    <rect x="297" y="273" width="18" height="20" rx="3" fill="#2a2e34"/>
+    <rect x="297" y="321" width="18" height="20" rx="3" fill="#2a2e34"/>
+    <rect x="272" y="298" width="20" height="18" rx="3" fill="#2a2e34"/>
+    <rect x="320" y="298" width="20" height="18" rx="3" fill="#2a2e34"/>
+  </g>
+  <text x="306" y="370" text-anchor="middle" fill="#6b7280" font-family="Segoe UI, Ubuntu, sans-serif" font-size="11">D-PAD</text>
+
+  <!-- Face buttons: Y top, A bottom, X left, B right -->
+  <circle cx="545" cy="198" r="20" fill="#c9a227" stroke="#7a6414" stroke-width="2" filter="url(#btnGlow)"/>
+  <text x="545" y="204" text-anchor="middle" fill="#1a1505" font-family="Segoe UI, Ubuntu, sans-serif" font-size="15" font-weight="800">Y</text>
+
+  <circle cx="545" cy="270" r="20" fill="#3d9b4a" stroke="#1f5c28" stroke-width="2" filter="url(#btnGlow)"/>
+  <text x="545" y="276" text-anchor="middle" fill="#061208" font-family="Segoe UI, Ubuntu, sans-serif" font-size="15" font-weight="800">A</text>
+
+  <circle cx="509" cy="234" r="20" fill="#3b7dc4" stroke="#1e446e" stroke-width="2" filter="url(#btnGlow)"/>
+  <text x="509" y="240" text-anchor="middle" fill="#061018" font-family="Segoe UI, Ubuntu, sans-serif" font-size="15" font-weight="800">X</text>
+
+  <circle cx="581" cy="234" r="20" fill="#c44b3b" stroke="#6e241c" stroke-width="2" filter="url(#btnGlow)"/>
+  <text x="581" y="240" text-anchor="middle" fill="#180806" font-family="Segoe UI, Ubuntu, sans-serif" font-size="15" font-weight="800">B</text>
+
+  <!-- Brand hint -->
+  <text x="360" y="455" text-anchor="middle" fill="#4b5563" font-family="Segoe UI, Ubuntu, sans-serif" font-size="12">Xbox 360 layout · clique para mapear</text>
+</svg>

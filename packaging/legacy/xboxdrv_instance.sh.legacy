@@ -1,0 +1,14 @@
+#!/bin/bash
+# Snapshot of the previous /usr/local/bin/xboxdrv_instance.sh (pre any-pad-to-xbox UI).
+# Kept only as historical reference — do not install.
+
+EVENT="$1"
+echo "Iniciando xboxdrv para /dev/input/$EVENT" >> /var/log/xboxdrv.log
+REMOTE_ACCESS=$(grep "^remote_access=" /etc/environment | cut -d '=' -f2)
+if [[ "$REMOTE_ACCESS" != "true" ]]; then
+    exit 0
+fi
+ID_VENDOR=$(udevadm info --query=property --name=/dev/input/$EVENT | grep "^ID_VENDOR_ID=" | cut -d '=' -f2)
+ID_PRODUCT=$(udevadm info --query=property --name=/dev/input/$EVENT | grep "^ID_MODEL_ID=" | cut -d '=' -f2)
+COMMON_OPTS="--detach-kernel-driver --no-extra-devices --deadzone 1% --mimic-xpad --silent"
+# DragonRise 0079:0006, USB Gamepad 0810:0001, SparkFun 1b4f:9206 — now in data/profiles.example.json
