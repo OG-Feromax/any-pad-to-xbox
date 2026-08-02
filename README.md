@@ -1,178 +1,144 @@
 # Any Pad to Xbox
 
-**Transforma qualquer controle USB genérico num Xbox 360 virtual no Linux.**
+Linux tool that turns a generic USB gamepad into a **virtual Xbox 360 controller**.
 
-Feito para Arch Linux e derivados (CachyOS, EndeavourOS, Manjaro, etc.).  
-Ideal para fliperama, fightstick, placa DragonRise, encoders baratos — qualquer pad que o jogo “não reconhece direito”.
+Built on Arch (works on CachyOS and other Arch-based distros). Aimed at cheap USB encoders, arcade cabinets, DragonRise boards, fightsticks — anything that shows up as a weird joystick instead of something games actually understand.
 
-> Em uma frase: você mapeia os botões uma vez na interface, clica **Enable**, e os jogos passam a ver um **controle Xbox 360** de verdade.
+You map buttons once in the GUI, hit **Enable**, and games see a normal Xbox 360 pad (`Microsoft X-Box 360 pad` over uinput). No xboxdrv.
 
----
-
-## O que este programa faz (e o que não faz)
-
-| Faz | Não faz |
-|-----|---------|
-| Lê o seu pad genérico | Não precisa do `xboxdrv` antigo |
-| Cria um **controle Xbox 360 virtual** (via kernel `uinput`) | Não “crackeia” nem altera jogos |
-| Guarda o mapeamento e reaplica quando você pluga o pad | Não funciona em Windows/macOS |
-| Serve bem para mash de fighting game (cada aperto conta) | Não substitui driver de placa de vídeo, etc. |
-
-**Por que precisa de senha às vezes?**  
-Só para instalar/ligar o serviço do sistema (como instalar um programa “de verdade”). O mapeamento dos botões fica na sua pasta de usuário — mapear **não** pede senha.
+The bridge is written for fighting-game mash: every physical edge is forwarded, and a down while already down forces a short up+down pulse so presses don’t get eaten.
 
 ---
 
-## Instalação — escolha um caminho
+## Requirements
 
-### Opção A — Pela AUR (recomendado no Arch / CachyOS)
-
-Se você usa um helper AUR (`yay`, `paru`, …):
-
-```bash
-yay -S any-pad-to-xbox-git
-```
-
-Depois abra **Any Pad to Xbox** no menu de aplicativos, ou no terminal:
-
-```bash
-any-pad-to-xbox
-```
-
-> Ainda não está na AUR? Use a **Opção B** abaixo. O pacote `any-pad-to-xbox-git` deste repositório é o que vamos publicar.
+- Arch Linux or derivative
+- Python 3.11+
+- Kernel `uinput` (usually already available: `sudo modprobe uinput`)
+- Ability to approve admin prompts (`pkexec`) when installing/enabling the system service
 
 ---
 
-### Opção B — Clonar e rodar (bem simples)
-
-Você só precisa de internet na primeira vez.
-
-1. Abra o **terminal**.
-2. Cole estes comandos (um bloco de cada vez):
+## Install / run from source
 
 ```bash
-# 1) Baixar o projeto
 git clone https://github.com/OG-Feromax/any-pad-to-xbox.git
 cd any-pad-to-xbox
-
-# 2) Abrir o programa (instala o gerenciador "uv" sozinho se precisar)
 ./scripts/any-pad-to-xbox
 ```
 
-Na **primeira vez** a janela pode pedir para instalar a integração do sistema → clique em **Install (asks for password)** e digite a senha do seu usuário (é o `pkexec` / Polkit do Linux).
+The launcher installs [`uv`](https://docs.astral.sh/uv/) if needed, syncs dependencies, and opens the app.
 
-Pronto. O programa abre.
+On first launch, if system integration isn’t installed yet, use **Install (asks for password)** in the UI. That copies the bridge, a small runner, and a systemd unit so a mapped pad can come back as Xbox after unplug/replug.
 
-<details>
-<summary>Se der erro de permissão no controle</summary>
+### Pad permissions
 
-No Arch, entrar no grupo `input` ajuda a ler o pad sem root:
+If the pad doesn’t show up (or can’t be read), add yourself to the `input` group, then log out and back in:
 
 ```bash
 sudo usermod -aG input "$USER"
 ```
 
-Depois **saia da sessão e entre de novo** (ou reinicie).
-</details>
+### AUR
+
+An `any-pad-to-xbox-git` PKGBUILD lives under [`packaging/aur/`](packaging/aur/). It isn’t published on the AUR yet (registration was down when this was prepared). When it’s up:
+
+```bash
+yay -S any-pad-to-xbox-git
+any-pad-to-xbox
+```
+
+See [`docs/AUR.md`](docs/AUR.md) for the maintainer-side publish steps.
 
 ---
 
-## Como usar (passo a passo de noob)
+## Using the app
 
-Imagine três etapas: **Mapear → Testar → Ativar**.
+Flow is: **map → enable → test**.
 
-### 1. Plugue o controle
+1. Plug the pad in. It should appear under **Connected controllers**. Hit **Refresh** if it doesn’t.
+2. Select it. If the top status says setup is missing, run **Install** once.
+3. **Start mapping.** The diagram highlights a control in amber — press the matching control on your physical pad. Repeat. Skip anything you don’t have.
+4. **Enable.** This may ask for your password; it starts the bridge / virtual pad. Status should show **Active** and **Virtual Xbox on**.
+5. **Test.** Press buttons on the real pad. Green on the diagram is what the virtual Xbox is outputting — that’s what games see.
 
-- Conecte o pad USB.
-- Ele deve aparecer na lista à esquerda (**Connected controllers**).
-- Se não aparecer: clique **Refresh**, troque a porta USB, ou confira o grupo `input` acima.
-
-### 2. Instale a parte do sistema (só uma vez)
-
-- Se a barra de status disser que falta setup → **Install (asks for password)**.
-- Isso coloca um “ajudante” no sistema para, quando o pad for plugado, nascer o Xbox virtual automaticamente.
-
-### 3. Mapeie os botões
-
-1. Selecione o seu controle na lista.
-2. Clique **Start mapping**.
-3. No desenho do Xbox, o botão em destaque fica **âmbar** (laranja).
-4. Aperte **no seu pad físico** o botão correspondente.
-5. Repita até mapear o que você precisa (A/B/X/Y, ombros, direcionais…).
-6. Pode pular o que não existir no seu pad (**Skip**).
-
-O mapeamento é salvo em:
+Mappings are stored in your home directory (no password required to save):
 
 `~/.config/any-pad-to-xbox/profiles.json`
 
-### 4. Ative (Enable)
+System copy used by the bridge after Enable:
 
-1. Clique **Enable** (pode pedir senha de novo — é para ligar o serviço).
-2. O status deve ir para **Active** e aparecer **Virtual Xbox on**.
-3. Agora os jogos devem ver um **Microsoft X-Box 360 pad**.
+`/etc/any-pad-to-xbox/profiles.json`
 
-### 5. Teste
+### Remapping later
 
-1. Clique **Test**.
-2. Aperte botões no pad físico.
-3. No desenho, o verde = o que o Xbox virtual está recebendo.  
-   Se acende verde, está certo para o jogo.
+**Remap** temporarily stops the virtual pad (password once) so the app can hear the hardware again. Change what you need, then **Enable** to apply.
 
-### Remapear depois
+### Diagram colors
 
-- **Remap** → o app desliga o virtual um instante (pede senha) para conseguir ouvir o pad de novo.
-- Mapeie à vontade.
-- Clique **Enable** outra vez para aplicar.
+- **Amber** — waiting for you to press something (learning)
+- **Green** — live virtual Xbox output
+- **Blue dashed** — direct pad preview (diagnostics only)
 
 ---
 
-## Cores no diagrama (pra não se perder)
+## Why does it ask for my password?
 
-| Cor | Significado |
-|-----|-------------|
-| Âmbar | Esperando você apertar (aprendendo) |
-| Verde | Sinal do **Xbox virtual** (o que o jogo vê) |
-| Azul tracejado | Só aparece em modo diagnóstico avançado |
+Saving a mapping does **not** need admin rights.
+
+Password prompts are only for system work: installing the helper, starting/stopping the bridge, applying profiles into `/etc`, writing udev rules. Same idea as installing software with `pkexec`.
 
 ---
 
-## Problemas comuns
+## Arcade / optical sticks
 
-**O jogo não vê o controle**  
-1. Confirme **Virtual Xbox on** / badge **Active**.  
-2. Em Steam: às vezes ajuda desligar temporariamente a configuração de Steam Input para testar.  
-3. Desplugue e plugue o pad depois do Enable.
+A lot of cab hardware (optical gates on a stick, DragonRise USB boards, etc.) is still **digital** under the hood — on/off per direction — even when Linux exposes `ABS_X` / `ABS_Y` with only a few values (e.g. 0 / 127 / 255).
 
-**Pedi senha demais**  
-Normal no primeiro setup e no Enable/Disable. Mapear botões **não** pede senha.
-
-**Meu fliperama / DragonRise / placa ótica**  
-Controles de fliperama costumam ser **digitais** (ligado/desligado), mesmo quando o Linux mostra eixos `ABS_X` / `ABS_Y`.  
-Mapeie o direcional para o D-pad do Xbox — o app já trata isso. Não precisa “calibrar analógico”.
-
-**Quero desligar o virtual**  
-Botão **Disable** no app.
-
-**Desinstalar a integração do sistema (avançado)**  
-Não há desinstalador gráfico ainda. Em resumo: pare os serviços `xboxdrv@…`, remova os arquivos em `/usr/local/lib/any-pad-to-xbox`, `/usr/local/bin/any-pad-to-xbox-runner`, a unit em `/etc/systemd/system/xboxdrv@.service` e regras em `/etc/udev/rules.d/99-any-pad-to-xbox.rules` se existirem. Se instalou pela AUR, `sudo pacman -Rns any-pad-to-xbox-git` já remove a maior parte.
+Map those axes to the Xbox D-pad. You don’t need analog calibration.
 
 ---
 
-## Para quem desenvolve / publica
+## Troubleshooting
 
-- UI + lógica: `src/any_pad_to_xbox/`
-- Bridge mash-safe (stdlib): `packaging/xpad_bridge.py`
-- Launcher com `uv`: `scripts/any-pad-to-xbox`
-- Pacote AUR (git): `packaging/aur/`
-- Guia “nunca publiquei na AUR”: [`docs/AUR.md`](docs/AUR.md)
+**Game doesn’t see a controller**  
+Confirm **Virtual Xbox on** / **Active**. Unplug and replug after Enable. On Steam, try disabling Steam Input for that game while testing.
+
+**Password again?**  
+Expected for Enable / Disable / first Install. Not for clicking buttons on the diagram while mapping.
+
+**Disable the virtual pad**  
+Use **Disable** in the app.
+
+**Remove system integration**  
+There’s no GUI uninstall yet. Stop any `xboxdrv@…` units, then remove:
+
+- `/usr/local/bin/any-pad-to-xbox-runner`
+- `/usr/local/lib/any-pad-to-xbox/`
+- `/etc/systemd/system/xboxdrv@.service`
+- `/etc/udev/rules.d/99-any-pad-to-xbox.rules` (if present)
+
+Reload systemd/udev after. If you installed from a future AUR package, `sudo pacman -Rns any-pad-to-xbox-git` is cleaner.
+
+---
+
+## Layout
+
+| Path | Role |
+|------|------|
+| `scripts/any-pad-to-xbox` | Dev launcher (`uv`) |
+| `src/any_pad_to_xbox/` | PySide6 UI + core |
+| `packaging/xpad_bridge.py` | Physical → Xbox uinput bridge |
+| `packaging/xboxdrv_runner.py` | Hotplug runner (systemd) |
+| `packaging/aur/` | AUR git package |
+| `assets/` | Xbox diagram + hit regions |
 
 ```bash
-./scripts/any-pad-to-xbox          # desenvolvimento
-sudo ./packaging/install-system.sh # só a integração systemd/udev/bridge
+./scripts/any-pad-to-xbox
+sudo ./packaging/install-system.sh   # system bits only
 ```
 
 ---
 
-## Licença
+## License
 
-[MIT](LICENSE) — use, modifique, compartilhe. Sem garantia.
+[MIT](LICENSE)
