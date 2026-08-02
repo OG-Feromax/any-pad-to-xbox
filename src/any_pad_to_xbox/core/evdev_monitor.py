@@ -416,10 +416,9 @@ class EvdevMonitor(QObject):
                     self.disconnected.emit()
                     return
 
-            # Resync held keys from kernel (~250 Hz). Event-only tracking drops
-            # "still held" if a down was missed or state flickered — UI looked idle
-            # while the user kept the button down.
-            if key_codes and (now - last_sync) >= 0.004:
+            # Resync held keys from kernel (~60 Hz backup). Event path is primary;
+            # this catches missed downs / stuck "still held" without burning CPU.
+            if key_codes and (now - last_sync) >= 0.016:
                 last_sync = now
                 try:
                     held = set(self._dev.active_keys())
@@ -437,7 +436,6 @@ class EvdevMonitor(QObject):
                         if changed:
                             self._dirty = True
                             self._urgent = True
-                    # Also refresh ABS current values (triggers stay pulled with no events)
                     for code, info in absinfo.items():
                         try:
                             cur = self._dev.absinfo(code).value
@@ -447,10 +445,13 @@ class EvdevMonitor(QObject):
                         amin = info.min
                         amax = info.max
                         norm = normalize_axis(name, cur, amin, amax)
+                        kind = axis_kind(name)
                         with self._lock:
                             if self.axis_state.get(name) != norm:
                                 self.axis_state[name] = norm
                                 self._dirty = True
+                                if kind in {"hat", "trigger"}:
+                                    self._urgent = True
 
             if self._dirty and (self._urgent or (now - last_emit) >= self._coalesce_s):
                 self._dirty = False

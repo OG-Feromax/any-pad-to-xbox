@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         self._bridge_active_cached = False
         self._last_live = ""
         self._last_test_lit = None
+        self._overlay_pending = False
         USER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
         root = QWidget()
@@ -267,11 +268,20 @@ class MainWindow(QMainWindow):
         self.monitor.error.connect(lambda m: self.tip.setText(f"Input error: {m}"))
         self.monitor.disconnected.connect(self._on_disconnect)
         self.virtual_monitor.diag_event.connect(self._on_diag_line)
+        # Event-driven paint (jstest-style): worker thread → queued slot on GUI.
+        self.monitor.state_changed.connect(
+            self._request_overlay_refresh, Qt.ConnectionType.QueuedConnection
+        )
+        self.virtual_monitor.state_changed.connect(
+            self._request_overlay_refresh, Qt.ConnectionType.QueuedConnection
+        )
 
+        # Safety net only (sticks / missed edges). Hot path is state_changed above.
         self._ui_poll = QTimer(self)
-        self._ui_poll.setTimerType(Qt.PreciseTimer)
-        self._ui_poll.timeout.connect(self._refresh_overlays)
-        self._ui_poll.start(4)
+        self._ui_poll.setTimerType(Qt.CoarseTimer)
+        self._ui_poll.timeout.connect(self._request_overlay_refresh)
+        self._ui_poll.start(33)
+        self.controller.set_release_hold(0.0)
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refresh_devices)
@@ -426,10 +436,19 @@ class MainWindow(QMainWindow):
 
     # --- modes ------------------------------------------------------------------
 
+    def _sync_diagram_feel(self) -> None:
+        # Test / overview live: instant off like jstest. Map: tiny hold so mash
+        # recovery pulses don't flicker the amber learning UX.
+        if self._mode == UiMode.MAP:
+            self.controller.set_release_hold(0.04)
+        else:
+            self.controller.set_release_hold(0.0)
+
     def _enter_map_mode(self) -> None:
         if not self.current or not self._system_ok():
             return
         self._mode = UiMode.MAP
+        self._sync_diagram_feel()
         self._guided_map = True
         self.checklist.setVisible(True)
         self.advanced_panel.setVisible(False)
@@ -451,6 +470,7 @@ class MainWindow(QMainWindow):
     def _cancel_map_mode(self) -> None:
         self._guided_map = False
         self._mode = UiMode.OVERVIEW
+        self._sync_diagram_feel()
         self.checklist.setVisible(False)
         self._learn_xbox = None
         self.controller.set_learn_target(None)
@@ -479,6 +499,7 @@ class MainWindow(QMainWindow):
         # Never leave a stale learn-pause blocking virtual highlights
         self._learn_paused = False
         self._mode = UiMode.TEST
+        self._sync_diagram_feel()
         self.checklist.setVisible(False)
         profile = self._current_profile()
         active = (
@@ -787,6 +808,17 @@ class MainWindow(QMainWindow):
         self.refresh_devices()
 
     # --- overlays ---------------------------------------------------------------
+
+    def _request_overlay_refresh(self) -> None:
+        """Coalesce bursty state_changed + poll into one GUI-loop paint."""
+        if self._overlay_pending:
+            return
+        self._overlay_pending = True
+        QTimer.singleShot(0, self._flush_overlays)
+
+    def _flush_overlays(self) -> None:
+        self._overlay_pending = False
+        self._refresh_overlays()
 
     def _fmt_live(
         self,
