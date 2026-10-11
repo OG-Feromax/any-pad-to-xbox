@@ -116,6 +116,7 @@ There’s no GUI uninstall yet. Stop any `xboxdrv@…` units, then remove:
 - `/usr/local/lib/any-pad-to-xbox/`
 - `/etc/systemd/system/xboxdrv@.service`
 - `/etc/udev/rules.d/99-any-pad-to-xbox.rules` (if present)
+- `/etc/udev/rules.d/65-any-pad-to-xbox-hide.rules` (if present; hides mapped physical pads from games)
 
 Reload systemd/udev after. If you installed from a future AUR package, `sudo pacman -Rns any-pad-to-xbox-git` is cleaner.
 

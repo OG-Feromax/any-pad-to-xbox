@@ -42,6 +42,8 @@ RUNNER_PATH = Path("/usr/local/bin/any-pad-to-xbox-runner")
 BRIDGE_PATH = Path("/usr/local/lib/any-pad-to-xbox/xpad_bridge.py")
 SERVICE_PATH = Path("/etc/systemd/system/xboxdrv@.service")
 UDEV_RULES_PATH = Path("/etc/udev/rules.d/99-any-pad-to-xbox.rules")
+# Must sort before 70-uaccess.rules, which reads ID_INPUT_JOYSTICK.
+UDEV_HIDE_RULES_PATH = Path("/etc/udev/rules.d/65-any-pad-to-xbox-hide.rules")
 
 # Legacy — no longer required (bridge replaces xboxdrv)
 XBOXDRV_BIN = Path("/usr/bin/xboxdrv")

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Launcher: ensure uv exists, sync deps, run the UI.
 set -euo pipefail
-
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$(dirname "$0")/.."
+#ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 cd "$ROOT"
 
 export PATH="${HOME}/.local/bin:${PATH}"
