@@ -160,6 +160,28 @@ only; expect well under a millisecond. The rest of the chain is not the bridge's
 A wired pad pays the USB poll and the frame wait whether or not this bridge is in the path,
 so the honest comparison is the middle rows, not the total.
 
+Because the poll interval is the biggest item, it is the one worth measuring — and the one
+you can change. `--poll` reads the same diag log and fits the lattice of inter-report gaps
+(idle stretches and same-report bursts are both excluded, and the answer names the largest
+interval that fits rather than the smallest, since every multiple of 8 is also a multiple of
+1):
+
+```bash
+./scripts/mash-check --poll --now          # fits the log as it stands
+```
+
+To try shortening it, override the driver's interval and re-measure:
+
+```bash
+sudo sh -c 'echo 1 > /sys/module/usbhid/parameters/jspoll'
+# unplug and replug the pad — usbhid reads the parameter at probe time, not on a live device
+./scripts/mash-check --poll --now
+```
+
+Replug matters, and so does the hub: behind a transaction translator the device may not
+actually reach 1 ms. A shorter interval costs roughly one URB per millisecond on that port.
+To keep it across boots, put `options usbhid jspoll=1` in `/etc/modprobe.d/usbhid.conf`.
+
 ### Measuring it on your own pad
 
 ```bash

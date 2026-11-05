@@ -416,6 +416,70 @@ class TestRiseTally:
         assert lost == 0
 
 
+class TestPollIntervalEstimate:
+    """The number that dominates latency, and the A/B for the jspoll experiment."""
+
+    def test_same_report_bursts_are_not_gaps(self, tool):
+        # down and up of one tap share a report (microseconds apart); only the real
+        # inter-report distances count, and they must not be dragged toward 0.
+        stamps = [0.0, 0.00001, 0.008, 0.00802, 0.016]
+        gaps = tool.report_gaps(stamps)
+        assert len(gaps) == 2
+        assert [round(g) for g in gaps] == [8, 8]
+
+    def test_a_1ms_poll_keeps_its_1ms_gaps(self, tool):
+        stamps = [i * 0.001 for i in range(10)]
+        assert len(tool.report_gaps(stamps)) == 9
+
+    def test_an_idle_pad_is_not_cadence(self, tool):
+        """A 28-minute gap between two mash sessions measures the human, not the device."""
+        stamps = [0.0, 0.008, 1727.058, 1727.066, 1727.074]
+        gaps = tool.report_gaps(stamps)
+        assert len(gaps) == 3
+        assert all(round(g) == 8 for g in gaps)
+
+    def test_picks_the_largest_fitting_interval_not_the_smallest(self, tool):
+        """Every multiple of 8 is also a multiple of 4, 2 and 1 — smallest-fits always
+        answers 1 and means nothing."""
+        gaps = [16.0, 24.0, 40.0, 48.0, 64.0, 8.0, 8.0, 16.0] * 4
+        assert tool.estimate_poll_interval(gaps)[0] == 8
+
+    def test_a_genuine_1ms_lattice_reads_as_1(self, tool):
+        gaps = [1.0, 2.0, 1.0, 3.0, 1.0, 2.0] * 6
+        assert tool.estimate_poll_interval(gaps)[0] == 1
+
+    def test_jitter_within_tolerance_still_fits(self, tool):
+        gaps = [8.0, 8.2, 7.9, 16.1, 24.0, 48.2] * 8
+        interval, fit = tool.estimate_poll_interval(gaps)
+        assert interval == 8 and fit > 0.9
+
+    def test_a_non_lattice_is_reported_as_none(self, tool):
+        gaps = [7.213, 11.618, 23.417, 41.623, 61.281, 97.442, 5.317, 13.684] * 3
+        assert tool.estimate_poll_interval(gaps)[0] is None
+
+    def test_no_gaps_is_not_an_interval(self, tool):
+        assert tool.estimate_poll_interval([]) == (None, 0.0)
+
+    def test_report_prints_the_interval_and_the_sample_size(
+        self, tool, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(tool, "read_since", lambda path, offset, window=0: (
+            ["1.0 BRIDGE start pid=1"]
+            + [f"{1 + i * 0.008:.6f} PHYS KEY BTN_THUMB down" for i in range(60)],
+            "the whole session",
+        ))
+        tool.poll_report(tmp_path / "any-pad-bridge.event20.diag", None, 0)
+        out = capsys.readouterr().out
+        assert "poll interval: 8 ms (125 Hz)" in out
+        assert "60 events" in out
+
+    def test_thin_data_says_so_instead_of_guessing(self, tool, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(tool, "read_since", lambda path, offset, window=0: (
+            ["1.0 BRIDGE start pid=1", "1.008 PHYS KEY BTN_THUMB down"], "the whole session"))
+        tool.poll_report(tmp_path / "x.diag", None, 0)
+        assert "press the pad and try again" in capsys.readouterr().out
+
+
 class TestGrabDetection:
     """--latency needs to read the physical node, which is impossible under the grab.
 

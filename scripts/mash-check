@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """mash-check: measure whether fast presses survive the bridge, on real hardware.
 
-Three modes, none needing root:
+Four modes, none needing root:
 
   ./scripts/mash-check --seconds 10   # mash during the countdown, get the live count
-  ./scripts/mash-check --diag         # mash during the countdown, then diff in vs out
-  ./scripts/mash-check --latency      # press during the countdown, get ms phys -> virtual
-  ./scripts/mash-check --list         # which virtual pad nodes this tool can see
+  ./scripts/mash-check --diag          # mash during the countdown, then diff in vs out
+  ./scripts/mash-check --latency       # press during the countdown, get ms phys -> virtual
+  ./scripts/mash-check --poll          # fit the pad's real USB report interval from the log
+  ./scripts/mash-check --list          # which virtual pad nodes this tool can see
 
 Both *wait for you*. Nothing is measured by pressing keys while a report command runs
 afterwards: the second mode reads `/tmp/any-pad-bridge.*.diag`, which the bridge writes
@@ -33,8 +34,10 @@ stdlib only, so it runs under /usr/bin/python3 like the bridge itself.
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import os
+import statistics
 import struct
 import subprocess
 import sys
@@ -700,6 +703,106 @@ def collect_rises(
     return tally_rises(frames, axis_codes)
 
 
+def phys_timestamps(lines) -> list[float]:
+    """Timestamps of every PHYS line, in file order (the bridge reads them in order)."""
+    out = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) > 2 and parts[1] == "PHYS":
+            try:
+                out.append(float(parts[0]))
+            except ValueError:
+                continue
+    return out
+
+
+def report_gaps(
+    stamps: list[float], same_report_below_ms: float = 0.3, max_gap_ms: float = 250.0
+) -> list[float]:
+    """Gaps between *distinct* USB reports, in ms.
+
+    Several events share one report (a tap's down and up, or a dpad pair), landing within
+    microseconds of each other. They are not evidence about the poll interval, and mixing
+    them in would drag the answer toward zero. The cut is absolute (0.3 ms), not relative
+    to the interval, so a 1 ms poll still shows its 1 ms gaps.
+
+    The ceiling is the other half: a pad left idle for 30 s produces a gap that is a
+    multiple of nothing — it measures when the human moved, not how the device is polled.
+    """
+    gaps = [(b - a) * 1000 for a, b in zip(stamps, stamps[1:])]
+    return [g for g in gaps if same_report_below_ms <= g <= max_gap_ms]
+
+
+def estimate_poll_interval(gaps: list[float], tol_ms: float = 0.4) -> tuple[int | None, float]:
+    """The USB poll interval the gaps are consistent with, or None if nothing fits.
+
+    The largest candidate dividing them all, not the smallest: every gap that is a
+    multiple of 8 is also a multiple of 4, 2 and 1, so "smallest fits" always answers 1
+    and means nothing. That also makes the tolerance load-bearing — a loose one lets 1 ms
+    divide anything and silently becomes the answer. Jitter here is sub-0.1 ms (bridge-side
+    stamps of one read batch), so 0.4 leaves room without degenerating.
+
+    Even so, "8 ms fits" is not proof the device was polled every 8 ms: if no gap of 8 ms
+    was ever observed, the data only shows the lattice's spacing, and poll_report says so.
+    """
+    if not gaps:
+        return None, 0.0
+    best: tuple[int | None, float] = (None, 0.0)
+    for candidate in range(1, 17):
+        hits = sum(1 for g in gaps if abs(g / candidate - round(g / candidate)) * candidate <= tol_ms)
+        fraction = hits / len(gaps)
+        if fraction >= 0.9 and (best[0] is None or candidate > best[0]):
+            best = (candidate, fraction)
+    return best
+
+
+def poll_report(path: Path, offset: int | None, window: float) -> None:
+    lines, scope = read_since(path, offset, window)
+    stamps = phys_timestamps(lines)
+    gaps = report_gaps(stamps)
+    header = next((l for l in lines if "BRIDGE start" in l), "(no BRIDGE start line)")
+    print(f"\n{path.name}  counting {scope}\n  session: {header}")
+    if len(gaps) < 20:
+        print(f"  only {len(gaps)} inter-report gap(s) — press the pad and try again")
+        return
+    interval, fit = estimate_poll_interval(gaps)
+    ordered = sorted(gaps)
+    print(f"  {len(stamps)} events, {len(gaps)} gaps (bursts inside one report excluded)")
+    print(
+        f"  min {ordered[0]:.2f} ms  median {statistics.median(ordered):.2f} ms  "
+        f"max {ordered[-1]:.2f} ms"
+    )
+    if interval is None:
+        print("  no clean poll interval — the gaps are not a lattice")
+    else:
+        print(f"  poll interval: {interval} ms ({1000 / interval:.0f} Hz), fits {100 * fit:.1f}% of gaps")
+        if ordered[0] > interval * 1.5:
+            print(
+                f"  smallest gap seen is {ordered[0]:.2f} ms, so {interval} ms is the best fit "
+                f"of the observed data, not proof the device was polled faster"
+            )
+    peaks = collections.Counter(round(g) for g in gaps).most_common(6)
+    print("  most common gaps (ms): " + ", ".join(f"{g}×{c}" for g, c in peaks))
+
+
+def poll_run(seconds: float, wait: bool = True) -> int:
+    """Characterise the pad's real USB poll interval from the diag log.
+
+    The number that dominates the latency chain, and the one to re-measure after
+    changing `usbhid jspoll` — before/after in two runs.
+    """
+    logs = diag_logs()
+    if not logs:
+        return _no_diag_log()
+    marks = {node: path.stat().st_size for node, path in logs} if wait else {}
+    if wait:
+        print(f"Mash now: measuring the report cadence for {seconds:.0f}s.")
+        time.sleep(seconds)
+    for node, path in logs:
+        poll_report(path, marks.get(node), seconds)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--seconds", type=float, default=10.0, help="window to watch (default 10)")
@@ -716,6 +819,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="measure kernel-timestamp delay from the physical event to the virtual one",
     )
+    parser.add_argument(
+        "--poll",
+        action="store_true",
+        help="measure the pad's real USB report interval from the diag log (jspoll A/B)",
+    )
     parser.add_argument("--list", action="store_true", help="show the virtual pad nodes found")
     parser.add_argument("device", nargs="*", help="explicit /dev/input/eventN to watch")
     args = parser.parse_args(argv)
@@ -724,6 +832,8 @@ def main(argv: list[str] | None = None) -> int:
         nodes = find_virtual_nodes()
         print("\n".join(f"{n} ({VIRTUAL_NAME})" for n in nodes) or "none found")
         return 0
+    if args.poll:
+        return poll_run(args.seconds, wait=not args.now)
     if args.latency:
         return measure_latency(args.seconds, args.device[0] if args.device else None)
     if args.diag:
