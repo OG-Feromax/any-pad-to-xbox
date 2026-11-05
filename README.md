@@ -42,6 +42,8 @@ Every entry point that touches `/etc` renders the same script, so an install is 
 
 The two rule files that make up the integration are `/etc/udev/rules.d/99-any-pad-to-xbox.rules` (start the bridge for a mapped pad) and `/etc/udev/rules.d/65-any-pad-to-xbox-hide.rules` (keep that pad out of game controller lists).
 
+The status bar compares those installed files with what the app would write, so a `git pull` that changes rule generation shows up as **yellow — N system file(s) are behind this app** instead of sitting invisible behind a green bar. `--reapply` does the same check and refuses to ask for your password (or restart the bridge and blink the pad out of a running game) when there is nothing to write.
+
 ### Pad permissions
 
 If the pad doesn’t show up (or can’t be read), add yourself to the `input` group, then log out and back in:
@@ -172,7 +174,7 @@ Reload systemd/udev after. If you installed from a future AUR package, `sudo pac
 | `packaging/xboxdrv_runner.py` | Hotplug runner (systemd) |
 | `packaging/aur/` | AUR git package |
 | `assets/` | Xbox diagram + hit regions |
-| `tests/` | pure-logic tests: no root, no pad, no Qt |
+| `tests/` | pure-logic tests: no root, no pad, no Qt — run by `.github/workflows/tests.yml` |
 
 ```bash
 ./scripts/any-pad-to-xbox            # the app

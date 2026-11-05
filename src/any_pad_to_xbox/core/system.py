@@ -7,7 +7,7 @@ The shell that runs as root is rendered by `core.installer` — this module only
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from any_pad_to_xbox import (
@@ -25,6 +25,7 @@ from any_pad_to_xbox.core.installer import (
     UNIT_SRC,
     InstallSources,
     _event_node,
+    drift,
     failure_message,
     generate_artifacts,
     install_possible,
@@ -45,11 +46,17 @@ class SystemStatus:
     config_dir_ok: bool
     in_input_group: bool
     details: list[str]
+    stale_paths: list[Path] = field(default_factory=list)
 
     # Back-compat for older UI that checked xboxdrv_installed
     @property
     def xboxdrv_installed(self) -> bool:
         return self.bridge_installed
+
+    @property
+    def system_stale(self) -> bool:
+        """The install exists but is not what this build would write."""
+        return bool(self.stale_paths)
 
 
 def check_system() -> SystemStatus:
@@ -84,6 +91,21 @@ def check_system() -> SystemStatus:
     if not in_input:
         details.append("User not in the input group (optional; recommended for live preview).")
 
+    # A git pull moves the code; it does not move /etc. Without this the two can sit
+    # apart forever with nothing in the UI saying so.
+    stale: list[Path] = []
+    if integration:
+        try:
+            stale = drift(_load_file(SYSTEM_PROFILES))
+        except (OSError, ValueError):
+            stale = []
+        if stale:
+            details.append(
+                f"System files are behind this app ({len(stale)}): "
+                + ", ".join(p.name for p in stale)
+                + " — hit Apply."
+            )
+
     return SystemStatus(
         bridge_installed=bridge_system or bridge_ok,
         uinput_ok=uinput_ok,
@@ -93,6 +115,7 @@ def check_system() -> SystemStatus:
         config_dir_ok=config_ok,
         in_input_group=in_input,
         details=details,
+        stale_paths=stale,
     )
 
 

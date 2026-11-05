@@ -51,6 +51,13 @@ def _render_script() -> str:
     )
 
 
+def _stale_paths() -> list[Path]:
+    """Installed files that differ from what this build would write."""
+    from any_pad_to_xbox.core.installer import InstallSources, drift
+
+    return drift(_cli_profiles(), sources=InstallSources.resolve())
+
+
 def _cli_main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="any-pad-to-xbox",
@@ -79,6 +86,14 @@ def _cli_main(argv: list[str]) -> int:
         return 0
 
     from any_pad_to_xbox.core.installer import failure_message, run_privileged
+
+    stale = _stale_paths()
+    if not stale:
+        # Applying would ask for a password and restart the bridge, blinking the
+        # virtual pad out of any running game, to write bytes that are already there.
+        print("System already matches this build — nothing to apply.")
+        return 0
+    print(f"Updating {len(stale)} file(s):\n  " + "\n  ".join(str(p) for p in stale))
 
     result = run_privileged(script)
     if result.returncode != 0:

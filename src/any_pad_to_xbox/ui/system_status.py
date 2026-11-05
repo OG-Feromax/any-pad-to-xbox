@@ -24,6 +24,8 @@ def _level(status: SystemStatus) -> str:
         return "red"
     if not status.uinput_ok:
         return "yellow"
+    if status.system_stale:
+        return "yellow"
     if not status.in_input_group:
         return "yellow"
     return "green"
@@ -164,6 +166,11 @@ class SystemStatusBar(QWidget):
             bits = []
             if not status.uinput_ok:
                 bits.append("Virtual controller support is missing (uinput).")
+            if status.system_stale:
+                bits.append(
+                    f"{len(status.stale_paths)} system file(s) are behind this app — "
+                    "Apply will bring them up to date."
+                )
             if not status.in_input_group:
                 bits.append("Your user is not in the input group (optional, recommended).")
             self.title.setText(C.SYSTEM_ATTENTION)

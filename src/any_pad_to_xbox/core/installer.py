@@ -323,3 +323,57 @@ def run_privileged(script: str) -> subprocess.CompletedProcess[str]:
 
 def failure_message(result: subprocess.CompletedProcess[str]) -> str:
     return (result.stderr or result.stdout or f"exit {result.returncode}").strip()
+
+
+def desired_files(
+    profiles: dict[str, Profile], sources: InstallSources | None = None
+) -> dict[Path, str]:
+    """Installed path → the content it should hold for this config.
+
+    Sources are only included when this checkout carries them, so an AUR install (no
+    `packaging/` in the wheel) has nothing to compare against and never reports a
+    difference it cannot fix.
+    """
+    sources = sources if sources is not None else InstallSources.resolve()
+    generated = generate_artifacts(profiles)
+    desired = {
+        SYSTEM_PROFILES: generated.profiles_json,
+        UDEV_RULES_PATH: generated.udev_rules,
+        UDEV_HIDE_RULES_PATH: generated.hide_rules,
+    }
+    for src, target in (
+        (sources.runner, RUNNER_PATH),
+        (sources.bridge, BRIDGE_PATH),
+        (sources.unit, SERVICE_PATH),
+    ):
+        if src is not None and src.is_file():
+            desired[target] = src.read_text(encoding="utf-8")
+    return desired
+
+
+def drift(
+    profiles: dict[str, Profile],
+    *,
+    sources: InstallSources | None = None,
+    diag_no_grab: bool = DIAG_NO_GRAB,
+) -> list[Path]:
+    """Installed files whose content is not what this build would write.
+
+    This is the check whose absence made a stale deploy invisible: git moved ahead, `/etc`
+    did not, and nothing anywhere reported it.
+    """
+    stale = [
+        path
+        for path, content in desired_files(profiles, sources).items()
+        if not _content_matches(path, content)
+    ]
+    if diag_no_grab != DIAG_NO_GRAB_FLAG.exists():
+        stale.append(DIAG_NO_GRAB_FLAG)
+    return sorted(stale)
+
+
+def _content_matches(path: Path, content: str) -> bool:
+    try:
+        return path.read_text(encoding="utf-8") == content
+    except OSError:
+        return False
