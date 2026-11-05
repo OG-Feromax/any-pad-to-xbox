@@ -103,7 +103,7 @@ def check_system() -> SystemStatus:
             details.append(
                 f"System files are behind this app ({len(stale)}): "
                 + ", ".join(p.name for p in stale)
-                + " — hit Apply."
+                + " — click Enable."
             )
 
     return SystemStatus(

@@ -1,7 +1,7 @@
 """Single source of truth for the privileged install/apply script.
 
 Every path that writes to `/etc`, `/usr/local` or the udev database renders through
-`render_install_script`: the GUI's Install button, the GUI's Apply button,
+`render_install_script`: the GUI's Install button, the GUI's Enable button,
 `packaging/install-system.sh` and `python -m any_pad_to_xbox --reapply`. Having four
 hand-written shell scripts instead of one renderer is what let them drift — the shell
 installer never wrote the udev rules, so pulling a commit that changed rule generation

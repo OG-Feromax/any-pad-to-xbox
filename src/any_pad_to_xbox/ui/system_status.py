@@ -169,7 +169,7 @@ class SystemStatusBar(QWidget):
             if status.system_stale:
                 bits.append(
                     f"{len(status.stale_paths)} system file(s) are behind this app — "
-                    "Apply will bring them up to date."
+                    "Enable will bring them up to date."
                 )
             if not status.in_input_group:
                 bits.append("Your user is not in the input group (optional, recommended).")

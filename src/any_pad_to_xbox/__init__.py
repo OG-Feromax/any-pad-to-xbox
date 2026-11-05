@@ -50,8 +50,8 @@ UDEV_HIDE_RULES_PATH = Path("/etc/udev/rules.d/65-any-pad-to-xbox-hide.rules")
 XBOXDRV_BIN = Path("/usr/bin/xboxdrv")
 
 # Dev-only: when True, bridge skips EVIOCGRAB so UI can also read the pad.
-# Set ANY_PAD_DIAG_NO_GRAB=1 in the environment and re-Apply: the runner reads the flag
-# file below, so the setting only reaches the bridge once it is written by an apply.
+# Set ANY_PAD_DIAG_NO_GRAB=1 in the environment and click Enable again: the runner reads
+# the flag file below, so the setting only reaches the bridge once it is written.
 DIAG_NO_GRAB = os.environ.get("ANY_PAD_DIAG_NO_GRAB", "").strip().lower() in {
     "1",
     "true",

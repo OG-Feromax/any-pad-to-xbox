@@ -1,7 +1,7 @@
 """Entry point: the UI by default, install/apply helpers on the command line.
 
 The CLI helpers exist so the system state can be synced without opening Qt. They only
-*render* what `core.installer` decides — same script the GUI's Apply runs — and they
+*render* what `core.installer` decides — same script the GUI's Enable runs — and they
 never edit the pad config: an existing `/etc/any-pad-to-xbox/profiles.json` is left
 alone, because the GUI is the thing that edits it.
 """

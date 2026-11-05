@@ -170,13 +170,13 @@ class TestStatusWiring:
         status = system.check_system()
         assert status.integration_installed is True
         assert status.system_stale is True
-        assert any("hit Apply" in d for d in status.details)
+        assert any("click Enable" in d for d in status.details)
 
     def test_no_drift_adds_no_warning(self, fake_root, monkeypatch):
         monkeypatch.setattr(system, "drift", lambda _p: [])
         status = system.check_system()
         assert status.system_stale is False
-        assert not any("Apply" in d for d in status.details)
+        assert not any("Enable" in d for d in status.details)
 
     def test_unreadable_profiles_cannot_break_the_status(self, fake_root, monkeypatch):
         """A half-written /etc file must not raise through the UI's status refresh."""

@@ -98,7 +98,7 @@ class TestSystemProfilesFile:
         assert profiles_to_system_json(two_pads).endswith("\n")
 
     def test_round_trip_through_disk_is_idempotent(self, tmp_path: Path, two_pads):
-        """Write → read → write must be byte-identical: re-Apply cannot drift."""
+        """Write → read → write must be byte-identical: re-Enable cannot drift."""
         first = profiles_to_system_json(two_pads)
         target = tmp_path / "profiles.json"
         target.write_text(first, encoding="utf-8")
