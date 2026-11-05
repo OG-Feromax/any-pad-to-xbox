@@ -125,10 +125,12 @@ udevadm info -q property /dev/input/event20 | grep ID_INPUT
 
 A mapped physical pad should show `ID_INPUT=1` with **no** `ID_INPUT_JOYSTICK` line; the virtual Xbox pad keeps its tag. If the tag is still there, re-**Apply** (the rules on disk may predate your last pull).
 
-Two things to expect after changing those rules:
+Two things this does **not** hide, and why:
 
-- Old `/dev/input/by-id/…-joystick` symlinks are not removed by a `--action=change` re-trigger; unplug and replug the pad to clear them.
-- The filter lives in the udev database. RetroArch's **joydev** input driver scans `/dev/input/js*` directly and ignores it, so the silent pad can still show up there — use the **udev** input driver.
+- **Tools that scan device nodes instead of asking udev** — `jstest-gtk`, `antimicrox`, RetroArch's **joydev** input driver. The kernel still creates a `js` node for the grabbed pad, and those tools open `/dev/input/js*` by directory listing, so the pad appears. It is inert (the bridge holds the events). Use the **udev** input driver in RetroArch; don't trust `jstest-gtk` as a check for this feature.
+- **`/dev/input/by-id/…-joystick` symlinks** on the physical pad. udev applies rules in lexical order, and the system's own `60-persistent-input.rules` creates that symlink from `ID_INPUT_JOYSTICK` *before* our `65-*` file clears the tag — so the symlink is made on every plug, replug included. It's a name, not an enumeration signal; games that filter by the property never see it.
+
+One pad, one grabber: another remapper running at the same time (antimicrox, a Steam Input rebind, …) competes for the physical device. Only the last `EVIOCGRAB` wins, so check with `fuser -v /dev/input/eventN` before chasing a pad that went silent.
 
 **Password again?**
 Expected for Enable / Disable / first Install. Not for clicking buttons on the diagram while mapping.
