@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -23,6 +23,10 @@ def _level(status: SystemStatus) -> str:
     if not status.integration_installed:
         return "red"
     if not status.uinput_ok:
+        return "yellow"
+    if status.system_stale:
+        return "yellow"
+    if status.diag_enabled:
         return "yellow"
     if not status.in_input_group:
         return "yellow"
@@ -164,6 +168,16 @@ class SystemStatusBar(QWidget):
             bits = []
             if not status.uinput_ok:
                 bits.append("Virtual controller support is missing (uinput).")
+            if status.diag_enabled:
+                bits.append(
+                    "Diagnostics mode is ON (the pad is not grabbed), so games list it "
+                    "twice — Enable without ANY_PAD_DIAG_NO_GRAB to play normally."
+                )
+            if status.system_stale:
+                bits.append(
+                    f"{len(status.stale_paths)} system file(s) are behind this app — "
+                    "Enable will bring them up to date."
+                )
             if not status.in_input_group:
                 bits.append("Your user is not in the input group (optional, recommended).")
             self.title.setText(C.SYSTEM_ATTENTION)

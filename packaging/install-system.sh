@@ -1,40 +1,32 @@
 #!/bin/bash
 # Install system integration (run via pkexec or as root).
+#
+# Deliberately contains no install logic: the commands come from the app's own installer
+# module, so this entry point cannot fall behind the GUI. The gap used to be real — this
+# file never wrote the udev rules, so pulling a commit that changed rule generation left
+# /etc on the old rules with no error anywhere.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON="${PYTHON:-python3}"
 
-install -d -m 755 /etc/any-pad-to-xbox
-install -d -m 755 /usr/local/bin
-install -d -m 755 /usr/local/lib/any-pad-to-xbox
-install -m 755 "$ROOT/packaging/xboxdrv_runner.py" /usr/local/bin/any-pad-to-xbox-runner
-install -m 755 "$ROOT/packaging/xpad_bridge.py" /usr/local/lib/any-pad-to-xbox/xpad_bridge.py
-install -m 644 "$ROOT/packaging/xboxdrv@.service" /etc/systemd/system/xboxdrv@.service
-
-if [[ ! -f /etc/any-pad-to-xbox/profiles.json ]]; then
-  if [[ -f "$ROOT/data/profiles.example.json" ]]; then
-    install -m 644 "$ROOT/data/profiles.example.json" /etc/any-pad-to-xbox/profiles.json
-  else
-    echo '{"version":1,"require_remote_access":false,"profiles":{}}' > /etc/any-pad-to-xbox/profiles.json
-  fi
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+  echo "python3 not found — set PYTHON=/path/to/python3 (3.11+)" >&2
+  exit 1
 fi
 
-modprobe uinput 2>/dev/null || true
-
-# Purge legacy xboxdrv so only our bridge owns mapped pads
-systemctl stop xboxdrv.service 2>/dev/null || true
-systemctl disable xboxdrv.service 2>/dev/null || true
-systemctl mask xboxdrv.service 2>/dev/null || true
-pkill -x xboxdrv 2>/dev/null || true
-sleep 0.2
-pkill -x xboxdrv 2>/dev/null || true
-if [[ -f /usr/local/bin/xboxdrv_instance.sh ]]; then
-  mv -f /usr/local/bin/xboxdrv_instance.sh /usr/local/bin/xboxdrv_instance.sh.bak
-fi
-if [[ -f /etc/udev/rules.d/99-joystick.rules ]] && grep -qE 'xboxdrv_instance|xboxdrv@' /etc/udev/rules.d/99-joystick.rules 2>/dev/null; then
-  mv -f /etc/udev/rules.d/99-joystick.rules /etc/udev/rules.d/99-joystick.rules.bak
+if ! "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+  echo "$PYTHON is older than 3.11, the project's minimum" >&2
+  exit 1
 fi
 
-systemctl daemon-reload
-udevadm control --reload
-echo "any-pad-to-xbox system integration installed (uinput bridge; legacy xboxdrv masked)."
+# Rendered from the checkout in $ROOT, not from any copy installed site-wide.
+script="$(PYTHONPATH="$ROOT/src" "$PYTHON" -m any_pad_to_xbox --print-script)"
+
+if [[ -z "$script" ]]; then
+  echo "installer renderer produced nothing — refusing to run an empty script" >&2
+  exit 1
+fi
+
+bash -c "$script"
+echo "any-pad-to-xbox system integration installed (uinput bridge, udev rules; legacy xboxdrv masked)."

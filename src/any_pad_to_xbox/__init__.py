@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -49,8 +50,14 @@ UDEV_HIDE_RULES_PATH = Path("/etc/udev/rules.d/65-any-pad-to-xbox-hide.rules")
 XBOXDRV_BIN = Path("/usr/bin/xboxdrv")
 
 # Dev-only: when True, bridge skips EVIOCGRAB so UI can also read the pad.
-# Not exposed in the UI — set True only while debugging, then Enable once.
-DIAG_NO_GRAB = False
+# Set ANY_PAD_DIAG_NO_GRAB=1 in the environment and click Enable again: the runner reads
+# the flag file below, so the setting only reaches the bridge once it is written.
+DIAG_NO_GRAB = os.environ.get("ANY_PAD_DIAG_NO_GRAB", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 DIAG_NO_GRAB_FLAG = SYSTEM_CONFIG_DIR / "diag_no_grab"
 
 XBOX_BUTTONS = [

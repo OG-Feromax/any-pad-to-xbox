@@ -1,6 +1,6 @@
 [project]
 name = "any-pad-to-xbox"
-version = "0.1.0"
+version = "0.2.0"
 description = "Map generic joysticks to virtual Xbox 360 pads on Arch Linux"
 readme = "README.md"
 license = "MIT"
@@ -31,3 +31,12 @@ packages = ["src/any_pad_to_xbox"]
 
 [tool.uv]
 package = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pyflakes>=3.3.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
