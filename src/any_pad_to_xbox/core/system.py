@@ -27,8 +27,10 @@ from any_pad_to_xbox.core.installer import (
     _event_node,
     failure_message,
     generate_artifacts,
+    install_possible,
     render_install_script,
     run_privileged,
+    system_components_present,
 )
 from any_pad_to_xbox.core.profiles import Profile, _load_file
 
@@ -100,17 +102,18 @@ def install_integration() -> tuple[bool, str]:
     Keeps whatever profiles.json is already on disk and re-starts the bridge for pads
     that are plugged in right now.
     """
-    missing = [
-        str(packaging_path(name))
-        for name in (RUNNER_SRC, BRIDGE_SRC, UNIT_SRC)
-        if not packaging_path(name).exists()
-    ]
-    if missing:
+    sources = InstallSources.resolve()
+    if not install_possible(sources, package_managed=system_components_present()):
+        missing = [
+            str(packaging_path(name))
+            for name in (RUNNER_SRC, BRIDGE_SRC, UNIT_SRC)
+            if not packaging_path(name).exists()
+        ]
         return False, "Packaging files not found: " + ", ".join(missing)
 
     script = render_install_script(
         generate_artifacts(_load_file(SYSTEM_PROFILES)),
-        sources=InstallSources.resolve(),
+        sources=sources,
         restart_connected=True,
         preserve_existing_profiles=True,
     )

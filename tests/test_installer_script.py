@@ -37,6 +37,7 @@ from any_pad_to_xbox.core.installer import (
     InstallSources,
     _event_node,
     generate_artifacts,
+    install_possible,
     render_install_script,
 )
 
@@ -335,6 +336,26 @@ class TestHeadlessPathNeedsNoVenv:
         # If someone re-adds hand-written install lines here, the drift can come back.
         assert "install -m" not in text
         assert "rules.d" not in text
+
+
+class TestInstallDecision:
+    """When is an install allowed to run at all?"""
+
+    def test_source_checkout_can_install(self):
+        assert install_possible(InstallSources.resolve(), package_managed=False) is True
+
+    def test_missing_sources_with_files_in_place_can_still_apply(self):
+        """The AUR case: no `packaging/` in the wheel, pacman already put the files down.
+
+        Refusing here dead-ends the user — the UI routes them to Install whenever
+        /etc/any-pad-to-xbox/profiles.json is missing, and that file is what the install
+        creates.
+        """
+        assert install_possible(InstallSources(), package_managed=True) is True
+
+    def test_nothing_to_write_fails_loudly(self):
+        """Neither sources nor an existing install: there is no usable script here."""
+        assert install_possible(InstallSources(), package_managed=False) is False
 
 
 class TestDiagNoGrabEnvVar:

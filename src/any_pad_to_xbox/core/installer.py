@@ -81,6 +81,26 @@ class InstallSources:
             unit=existing(UNIT_SRC),
         )
 
+    @property
+    def is_complete(self) -> bool:
+        return bool(self.runner and self.bridge and self.unit)
+
+
+def system_components_present() -> bool:
+    """Are the runner, bridge and unit already in place (package-managed install)?"""
+    return all(path.is_file() for path in (RUNNER_PATH, BRIDGE_PATH, SERVICE_PATH))
+
+
+def install_possible(sources: InstallSources, *, package_managed: bool) -> bool:
+    """Whether an install has anything to write.
+
+    A source checkout copies `packaging/` itself. An AUR install ships only the built
+    wheel, which contains no `packaging/`, and pacman has already placed those three
+    files — refusing there would dead-end the user, since the UI sends them to Install
+    whenever `/etc/any-pad-to-xbox/profiles.json` is still missing.
+    """
+    return sources.is_complete or package_managed
+
 
 @dataclass(frozen=True)
 class GeneratedArtifacts:
