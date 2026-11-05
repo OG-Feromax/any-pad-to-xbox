@@ -136,6 +136,27 @@ encoders re-send the same value while a direction is held, and pulsing that woul
 every hold look like mash. For tap-dpad use `--dpad-as-button` (the SparkFun profile),
 which maps directions to keys and therefore gets edge recovery.
 
+### Where the milliseconds go
+
+```bash
+./scripts/mash-check --latency --seconds 15   # press the pad during the window
+```
+
+`--latency` compares **kernel timestamps**: the physical event when the kernel received the
+USB report, the virtual one when uinput injected the translation. Needs diag mode, since the
+bridge's exclusive grab otherwise hides the physical side. That number is the kernel + bridge
+hop only — expect well under a millisecond. The rest of the chain is not the bridge's:
+
+| stage | typical | how to see it |
+|---|---|---|
+| USB polling of the pad | 0 to one poll interval (8–16 ms on these encoders) | `sudo lsusb -v -d 0079:0006 \| grep -i bInterval`; also shows as the gap lattice in the diag log |
+| kernel input layer → bridge → uinput | < 0.1 ms | `--latency` |
+| bridge translating one event | ~0.01 ms, ~0.04 ms worst | PHYS→EMIT delta in `/tmp/any-pad-bridge.*.diag` |
+| game sampling input | 0 to one frame (16.7 ms at 60 Hz) | outside the app |
+
+A wired pad pays the USB poll and the frame wait whether or not this bridge is in the path,
+so the honest comparison is the middle rows, not the total.
+
 ### Measuring it on your own pad
 
 ```bash

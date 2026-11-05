@@ -363,6 +363,50 @@ class TestDiagDiff:
         assert "ANY_PAD_DIAG_NO_GRAB=1" in err and "click Enable" in err
 
 
+class TestLatencyPairing:
+    """The number he asked for: delay from the physical event to the virtual one."""
+
+    PAIRS = {289: 304, 293: 0x02}  # BTN_THUMB→BTN_A, BTN_PINKIE→ABS_Z
+
+    def test_delta_is_physical_to_virtual(self, tool):
+        deltas, lost = tool.pair_latencies([(1.000, 289)], [(1.004, 304)], self.PAIRS)
+        assert deltas == [pytest.approx(4.0)]
+        assert lost == 0
+
+    def test_earliest_pending_press_answers_first(self, tool):
+        deltas, _lost = tool.pair_latencies(
+            [(1.000, 289), (1.002, 289)], [(1.005, 304), (1.009, 304)], self.PAIRS
+        )
+        assert deltas == [pytest.approx(5.0), pytest.approx(7.0)]
+
+    def test_a_swallowed_press_is_reported_not_folded_into_latency(self, tool):
+        """One lost press must not make every later press on that button look slow."""
+        deltas, lost = tool.pair_latencies(
+            [(1.000, 289), (2.000, 289)], [(2.003, 304)], self.PAIRS
+        )
+        assert deltas == [pytest.approx(3.0)]
+        assert lost == 1
+
+    def test_presses_outside_the_map_are_ignored(self, tool):
+        deltas, lost = tool.pair_latencies([(1.0, 999)], [(1.5, 304)], self.PAIRS)
+        assert deltas == [] and lost == 0
+
+    def test_axis_target_counts_as_a_press(self, tool):
+        deltas, _lost = tool.pair_latencies([(1.000, 293)], [(1.012, 0x02)], self.PAIRS)
+        assert deltas == [pytest.approx(12.0)]
+
+    def test_stats_shape(self, tool):
+        assert tool.stats([]) == "no samples"
+        line = tool.stats([1.0, 2.0, 3.0, 4.0])
+        assert "n=4" in line and "median 3.00" in line and "max 4.00 ms" in line
+
+    def test_no_pad_gives_the_diag_mode_hint(self, tool, monkeypatch, capsys):
+        monkeypatch.setattr(tool, "load_profiles", lambda: {})
+        monkeypatch.setattr(tool, "find_physical_nodes", lambda ids: [])
+        assert tool.main(["--latency"]) == 2
+        assert "ANY_PAD_DIAG_NO_GRAB=1" in capsys.readouterr().err
+
+
 class TestStuckDetection:
     def test_a_button_left_down_is_reported(self, tool, capsys):
         tool._report({304: [1.0, 2.0]}, {304}, 10.0)

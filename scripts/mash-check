@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """mash-check: measure whether fast presses survive the bridge, on real hardware.
 
-Two modes, neither needing root:
+Three modes, none needing root:
 
   ./scripts/mash-check --seconds 10   # mash during the countdown, get the live count
   ./scripts/mash-check --diag         # mash during the countdown, then diff in vs out
+  ./scripts/mash-check --latency      # press during the countdown, get ms phys -> virtual
   ./scripts/mash-check --list         # which virtual pad nodes this tool can see
 
 Both *wait for you*. Nothing is measured by pressing keys while a report command runs
@@ -480,6 +481,164 @@ def diag_run(seconds: float, wait: bool = True) -> int:
     )
 
 
+def pair_latencies(
+    phys: list[tuple[float, int]],
+    virt: list[tuple[float, int]],
+    pairs: dict[int, int],
+    stale_after: float = 0.5,
+) -> tuple[list[float], int]:
+    """Greedily match each virtual press to the earliest unmatched physical one.
+
+    `phys` is (timestamp, physical code) rises, `virt` is (timestamp, target code) rises.
+    Returns (deltas in ms, physical presses with no answer). Anything older than
+    `stale_after` is counted as lost rather than paired — otherwise one swallowed press
+    inflates every later latency on that button.
+    """
+    queues: dict[int, list[float]] = defaultdict(list)
+    for ts, code in phys:
+        target = pairs.get(code)
+        if target is not None:
+            queues[target].append(ts)
+
+    deltas: list[float] = []
+    lost = 0
+    for ts, code in virt:
+        queue = queues.get(code)
+        if queue is None:
+            continue
+        while queue and ts - queue[0] > stale_after:
+            queue.pop(0)
+            lost += 1
+        if queue:
+            deltas.append((ts - queue.pop(0)) * 1000.0)
+    return deltas, lost + sum(len(q) for q in queues.values())
+
+
+def stats(values: list[float]) -> str:
+    if not values:
+        return "no samples"
+    ordered = sorted(values)
+    median = ordered[len(ordered) // 2]
+    p95 = ordered[min(len(ordered) - 1, int(0.95 * len(ordered)))]
+    mean = sum(ordered) / len(ordered)
+    return (
+        f"n={len(ordered)}  min {ordered[0]:.2f}  median {median:.2f}  "
+        f"mean {mean:.2f}  p95 {p95:.2f}  max {ordered[-1]:.2f} ms"
+    )
+
+
+def find_physical_nodes(profile_ids: set[str]) -> list[tuple[str, Path]]:
+    """[(vendor:product, node)] for mapped pads currently plugged in."""
+    return [
+        (ident.lower(), path)
+        for path in sorted(Path("/dev/input").glob("event*"))
+        if (ident := pad_id(path.name)) and ident.lower() in profile_ids
+    ]
+
+
+def measure_latency(seconds: float, device: str | None) -> int:
+    """Kernel-timestamp latency from the physical event to the virtual one.
+
+    This is the honest end-to-end number for what the bridge sits between: the physical
+    stamp is when the kernel received the USB report, the virtual one when uinput injected
+    the translated event. So it includes the device's USB polling interval and the kernel
+    input layer — neither of which the bridge can avoid or add to. Pairing needs the pad
+    readable alongside the bridge, i.e. diag mode.
+    """
+    profiles = load_profiles()
+    enabled = {k.lower() for k, p in profiles.items() if p.get("enabled", True)}
+    if device:
+        pads = [((pad_id(Path(device).name) or "?").lower(), Path(device))]
+    else:
+        pads = [(i, p) for i, p in find_physical_nodes(enabled)]
+    if not pads:
+        print(
+            "no mapped pad found. Pass it explicitly, and run the bridge in diag mode so "
+            "the physical node is readable: ANY_PAD_DIAG_NO_GRAB=1, then Enable.",
+            file=sys.stderr,
+        )
+        return 2
+
+    bridge = load_bridge_module()
+    if bridge is None:
+        print("cannot load the bridge module — no code tables", file=sys.stderr)
+        return 2
+
+    virt_nodes = find_virtual_nodes()
+    if not virt_nodes:
+        print("no virtual pad node — is a bridge running?", file=sys.stderr)
+        return 2
+
+    print(
+        f"One window per pad ({seconds:.0f}s each). Press that pad while it counts."
+    )
+
+    all_deltas: list[float] = []
+    for ident, phys_node in pads:
+        profile = profiles.get(ident)
+        if profile is None:
+            print(f"{phys_node}: no profile for {ident}, skipped", file=sys.stderr)
+            continue
+        pairs, axis_codes = {}, set()
+        for phys_name, xbox in (profile.get("evdev_keymap") or {}).items():
+            code = resolve(bridge, phys_name)
+            target = bridge.XBOX_BTN_CODES.get(xbox, bridge.XBOX_ABS_CODES.get(xbox))
+            if code is None or target is None:
+                continue
+            pairs[code] = target
+            if target in bridge.XBOX_ABS_CODES.values():
+                axis_codes.add(target)
+        if not pairs:
+            print(f"{phys_node}: nothing mappable in {ident}, skipped", file=sys.stderr)
+            continue
+        print(f"  pressing on {phys_node} now…")
+        phys, virt = collect_rises(phys_node, virt_nodes[0], seconds, axis_codes)
+        deltas, lost = pair_latencies(phys, virt, pairs)
+        print(f"{phys_node} → {virt_nodes[0]}  {stats(deltas)}")
+        if lost:
+            print(f"  {lost} physical press(es) never came out as a virtual press")
+        all_deltas += deltas
+    return 0 if all_deltas else 1
+
+
+def collect_rises(
+    phys_node: Path, virt_node: Path, seconds: float, axis_codes: set[int]
+):
+    """(physical rises, virtual rises) with kernel timestamps, for one window.
+
+    Axis targets are included in the virtual side because a button mapped to lt/rt leaves
+    the bridge as an EV_ABS ramp: its press is a 0→nonzero transition, not an EV_KEY.
+    """
+    fds = {}
+    for label, node in (("phys", phys_node), ("virt", virt_node)):
+        try:
+            fds[label] = os.open(str(node), os.O_RDONLY | os.O_NONBLOCK)
+        except OSError as exc:
+            print(f"cannot read {node}: {exc}", file=sys.stderr)
+            for handle in fds.values():
+                os.close(handle)
+            return [], []
+    phys: list[tuple[float, int]] = []
+    virt: list[tuple[float, int]] = []
+    axis_last: dict[int, int] = {}
+    try:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            for fd in _select(list(fds.values())):
+                label = next(k for k, v in fds.items() if v == fd)
+                for ts, etype, code, value in _drain(fd):
+                    if etype == EV_KEY and value == 1:
+                        (phys if label == "phys" else virt).append((ts, code))
+                    elif label == "virt" and etype == EV_ABS and code in axis_codes:
+                        if value and not axis_last.get(code, 0):
+                            virt.append((ts, code))
+                        axis_last[code] = value
+    finally:
+        for handle in fds.values():
+            os.close(handle)
+    return phys, virt
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--seconds", type=float, default=10.0, help="window to watch (default 10)")
@@ -491,6 +650,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--now", action="store_true", help="with --diag: report the whole session, no wait"
     )
+    parser.add_argument(
+        "--latency",
+        action="store_true",
+        help="measure kernel-timestamp delay from the physical event to the virtual one",
+    )
     parser.add_argument("--list", action="store_true", help="show the virtual pad nodes found")
     parser.add_argument("device", nargs="*", help="explicit /dev/input/eventN to watch")
     args = parser.parse_args(argv)
@@ -499,6 +663,8 @@ def main(argv: list[str] | None = None) -> int:
         nodes = find_virtual_nodes()
         print("\n".join(f"{n} ({VIRTUAL_NAME})" for n in nodes) or "none found")
         return 0
+    if args.latency:
+        return measure_latency(args.seconds, args.device[0] if args.device else None)
     if args.diag:
         return diag_run(args.seconds, wait=not args.now)
 
