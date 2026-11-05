@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
 """mash-check: measure whether fast presses survive the bridge, on real hardware.
 
-Two views, no root needed:
+Two modes, neither needing root:
 
-  ./scripts/mash-check                      # watch the virtual Xbox pad while you mash
-  ./scripts/mash-check --diag               # diff PHYS in vs EMIT out (needs diag mode)
-  ./scripts/mash-check --list               # which nodes this tool can see
+  ./scripts/mash-check --seconds 10   # mash during the countdown, get the live count
+  ./scripts/mash-check --diag         # mash during the countdown, then diff in vs out
+  ./scripts/mash-check --list         # which virtual pad nodes this tool can see
 
-The first counts what a game actually receives: one down edge per recognized press, plus
-the rate, the fastest gap, and any button left stuck down.
+Both *wait for you*. Nothing is measured by pressing keys while a report command runs
+afterwards: the second mode reads `/tmp/any-pad-bridge.*.diag`, which the bridge writes
+continuously while it runs without its exclusive grab, so the mashing has to happen in
+that state. The full sequence for the strict test is:
 
-The second is the strict equivalence test. It needs the bridge started with
-ANY_PAD_DIAG_NO_GRAB=1 and re-applied, which also makes the bridge skip EVIOCGRAB —
-that is the only state where the physical pad can be observed independently, so the log
-holds both sides with timestamps. It then answers, per button: presses attempted vs
-presses emitted.
+  1. ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox
+  2. select the pad, click Enable                     (asks for your password)
+  3. ./scripts/mash-check --diag --seconds 10         (mash during the countdown)
+  4. Enable again without the variable to go back     (normal play)
+
+Mode 1 counts what a game receives: one down edge per recognized press, the rate, the
+fastest gap, and any button left stuck down. Mode 2 answers, per pad and per control, how
+many presses the pad sent versus how many the virtual pad emitted — the only state where
+the physical side is observable separately is diag mode, because the bridge normally holds
+an exclusive EVIOCGRAB on it.
 
 stdlib only, so it runs under /usr/bin/python3 like the bridge itself.
 """
@@ -25,6 +32,7 @@ import argparse
 import json
 import os
 import struct
+import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -34,7 +42,9 @@ EVENT_FMT = "llHHi"
 EVENT_SIZE = struct.calcsize(EVENT_FMT)
 EV_SYN, EV_KEY = 0x00, 0x01
 
-DIAG_LOG = Path("/tmp/any-pad-bridge.diag")
+DIAG_DIR = Path("/tmp")
+DIAG_LEGACY = Path("/tmp/any-pad-bridge.diag")
+DIAG_LOG = DIAG_LEGACY  # pre-per-node builds
 SYSTEM_PROFILES = Path("/etc/any-pad-to-xbox/profiles.json")
 USER_PROFILES = Path.home() / ".config" / "any-pad-to-xbox" / "profiles.json"
 BRIDGE_CANDIDATES = (
@@ -174,112 +184,269 @@ def load_profiles() -> dict:
     return {}
 
 
-def key_pairs(bridge) -> tuple[list[tuple[int, int, str]], list[str]]:
-    """(physical code, virtual code, xbox name) for every button mapping in use.
+def diag_logs(diag_dir: Path | None = None) -> list[tuple[str, Path]]:
+    """[(event node, path)] — one log per pad, since the runner names them by node.
 
-    Joined on code numbers, not on the names in the log: `_code_name` may emit an alias,
-    and physical/virtual names for the same press are different words by design
-    (BTN_THUMB in, BTN_A out). Axis-mapped controls are reported separately.
+    Falls back to the single legacy path. A legacy log cannot be attributed to one pad,
+    so its report is totals-only instead of a guess.
     """
-    pairs, axis_only = [], []
-    for profile in load_profiles().values():
-        for phys_name, xbox in (profile.get("evdev_keymap") or {}).items():
-            if xbox in bridge.XBOX_ABS_CODES:
-                axis_only.append(f"{phys_name}→{xbox}")
-                continue
-            code = bridge.resolve_code(phys_name)
-            virtual = bridge.XBOX_BTN_CODES.get(xbox)
-            if code is None or virtual is None:
-                axis_only.append(f"{phys_name}→{xbox}")
-                continue
-            pairs.append((code, virtual, xbox))
-        # Directions that arrive as an analog axis are level state (EV_ABS), not key
-        # edges, so they cannot take part in a KEY-line diff at all.
-        axis_only += [f"{name}→{xbox}" for name, xbox in (profile.get("evdev_absmap") or {}).items()]
-    return pairs, axis_only
+    diag_dir = DIAG_DIR if diag_dir is None else diag_dir
+    found: list[tuple[str, Path]] = [
+        (path.stem.split(".")[-1], path)
+        for path in sorted(diag_dir.glob("any-pad-bridge.event*.diag"))
+    ]
+    if not found and DIAG_LEGACY.exists():
+        found.append(("", DIAG_LEGACY))
+    return found
 
 
-def diag_report(seconds: float) -> int:
-    """Strict equivalence: every physical press must show up as a virtual down."""
-    if not DIAG_LOG.exists():
-        print(
-            f"{DIAG_LOG} not found.\nStart diag mode, then mash:\n"
-            "  ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox   # then Apply",
-            file=sys.stderr,
-        )
-        return 2
+def pad_id(node: str) -> str | None:
+    """`vendor:product` for /dev/input/<node> — the key the profiles use."""
+    if not node:
+        return None
+    try:
+        out = subprocess.run(
+            ["udevadm", "info", "-q", "property", f"/dev/input/{node}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+    except OSError:
+        return None
+    values = dict(
+        line.split("=", 1) for line in out.splitlines() if "=" in line and line.startswith("ID_")
+    )
+    vendor, product = values.get("ID_VENDOR_ID"), values.get("ID_MODEL_ID")
+    return f"{vendor}:{product}" if vendor and product else None
 
-    bridge = load_bridge_module()
-    if bridge is None:
-        print("cannot read the bridge module, so per-button mapping is unavailable", file=sys.stderr)
 
-    lines = DIAG_LOG.read_text(encoding="utf-8").splitlines()
-    age = time.time() - DIAG_LOG.stat().st_mtime
-    header = next((line for line in lines if "BRIDGE start" in line), "(no BRIDGE start line)")
-    print(f"session: {header}")
-    if age > 120:
-        print(f"WARNING: log is {age / 60:.0f} min old — this is a previous session's data.\n")
+def resolve(bridge, name: str) -> int | None:
+    """`resolve_code` raises on an unknown name — this tool must degrade, not crash."""
+    try:
+        return bridge.resolve_code(name)
+    except (KeyError, ValueError):
+        return None
 
-    phys_downs: dict[int, int] = defaultdict(int)
-    virt_downs: dict[int, int] = defaultdict(int)
+
+def key_pairs(bridge, profile: dict) -> tuple[list[tuple[int, int, str, str]], list[str]]:
+    """(physical code, target code, xbox name, kind) for ONE pad's mapping.
+
+    `kind` is "key" or "axis": a button mapped to `lt`/`rt` leaves the bridge as an
+    `EV_ABS` ramp, so counting only KEY output lines would report those presses as lost.
+    The DragonRise profile does exactly that for two of its ten buttons.
+
+    Scoped to one profile on purpose: building the pairs from every profile in /etc mixes
+    other pads' buttons into this pad's report — a physical code belonging to a different
+    encoder shows up as "0 in", and a virtual code two pads share gets printed once per
+    pad. That produced a confident, meaningless table.
+
+    Joined on code numbers, not on the names in the log: the same press is BTN_THUMB in
+    and BTN_A out.
+    """
+    pairs, level_only = [], []
+    for phys_name, xbox in (profile.get("evdev_keymap") or {}).items():
+        code = resolve(bridge, phys_name)
+        if code is None:
+            level_only.append(f"{phys_name}→{xbox}")
+            continue
+        virtual = bridge.XBOX_BTN_CODES.get(xbox)
+        if virtual is not None:
+            pairs.append((code, virtual, xbox, "key"))
+            continue
+        ramp = bridge.XBOX_ABS_CODES.get(xbox)
+        if ramp is not None:
+            pairs.append((code, ramp, xbox, "axis"))
+            continue
+        level_only.append(f"{phys_name}→{xbox}")
+    # Directions arriving as an analog axis are level state in and out: no edge to count.
+    level_only += [f"{name}→{xbox}" for name, xbox in (profile.get("evdev_absmap") or {}).items()]
+    return pairs, level_only
+
+
+def count_rises(bridge, lines, codes: set[int]) -> dict[int, int]:
+    """0→nonzero transitions per EV_ABS code — a press on an axis-mapped trigger."""
+    rises: dict[int, int] = dict.fromkeys(codes, 0)
+    last: dict[int, int] = {}
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 5 or parts[2] != "ABS" or parts[1] not in {"EMIT", "PULSE"}:
+            continue
+        code = resolve(bridge, parts[3])
+        if code not in codes:
+            continue
+        try:
+            value = int(parts[4].split("=", 1)[1])
+        except (ValueError, IndexError):
+            continue
+        if value and not last.get(code, 0):
+            rises[code] += 1
+        last[code] = value
+    return rises
+
+
+def count_downs(bridge, lines) -> tuple[dict[int, int], dict[int, int], dict[str, int]]:
+    """(physical downs by code, virtual downs by code, names that did not resolve)."""
+    phys: dict[int, int] = defaultdict(int)
+    virt: dict[int, int] = defaultdict(int)
+    unknown: dict[str, int] = defaultdict(int)
     for line in lines:
         parts = line.split()
         if len(parts) < 5 or parts[2] != "KEY" or parts[4] != "down":
             continue
-        if parts[1] == "PHYS":
-            code = _name_to_code(bridge, parts[3])
-            if code is not None:
-                phys_downs[code] += 1
-        elif parts[1] in {"EMIT", "PULSE"}:
-            code = _name_to_code(bridge, parts[3])
-            if code is not None:
-                virt_downs[code] += 1
+        tag, name = parts[1], parts[3]
+        if tag not in {"PHYS", "EMIT", "PULSE"}:
+            continue
+        code = resolve(bridge, name)
+        if code is None:
+            unknown[name] += 1
+            continue
+        (phys if tag == "PHYS" else virt)[code] += 1
+    return phys, virt, unknown
 
-    if not phys_downs:
-        print("log has no PHYS KEY lines yet — mash the pad, then rerun --diag", file=sys.stderr)
-        return 1
 
-    if bridge is None:
-        print(
-            f"\nPHYS downs: {sum(phys_downs.values())}   virtual downs: {sum(virt_downs.values())}"
-            "   (aggregate only — could not load the mapping table)"
-        )
+def _no_diag_log() -> int:
+    print(
+        f"no {DIAG_DIR}/any-pad-bridge.*.diag found.\n"
+        "That log only exists while the bridge runs without the exclusive grab:\n"
+        "  1. ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox\n"
+        "  2. click Enable on the pad      (asks for your password)\n"
+        "  3. ./scripts/mash-check --diag  (mash during the countdown)",
+        file=sys.stderr,
+    )
+    return 2
+
+
+def profile_codes(bridge, profile: dict) -> set[int]:
+    return {
+        code
+        for code in (resolve(bridge, name) for name in (profile.get("evdev_keymap") or {}))
+        if code is not None
+    }
+
+
+def choose_profile(
+    bridge, profiles: dict, ident: str | None, seen: set[int]
+) -> tuple[dict | None, str]:
+    """Which profile wrote this log.
+
+    Named logs say so via their node. For a legacy log, infer only when exactly one
+    profile covers every physical code observed — guessing here is how a table of invented
+    losses got published once already.
+    """
+    if ident:
+        profile = profiles.get(ident.lower())
+        if profile is not None:
+            return profile, ident
+    candidates = [
+        (key, profile)
+        for key, profile in profiles.items()
+        if seen and seen <= profile_codes(bridge, profile)
+    ]
+    if len(candidates) == 1:
+        key, profile = candidates[0]
+        return profile, f"{key} (inferred from the codes in the log)"
+    return None, f"no profile for {ident}" if ident else f"{len(candidates)} profiles fit"
+
+
+def report_pad(node: str, path: Path, bridge) -> int:
+    """One pad's PHYS-vs-virtual equivalence. Returns the number of unaccounted presses."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    header = next((line for line in lines if "BRIDGE start" in line), "(no BRIDGE start line)")
+    age = time.time() - path.stat().st_mtime
+    ident = pad_id(node)
+    label = f"/dev/input/{node}" if node else "(legacy log path)"
+    print(f"\n{label}{' [' + ident + ']' if ident else ''}\n  session: {header}")
+    if age > 120:
+        print(f"  WARNING: log is {age / 60:.0f} min old — not your current mash.")
+
+    phys, virt, unknown = count_downs(bridge, lines)
+    if unknown:
+        print("  code names this tool could not resolve: " + ", ".join(sorted(unknown)))
+    if not phys:
+        print("  no PHYS KEY lines in this log — mash the pad, then run --diag again.")
         return 0
 
-    pairs, axis_only = key_pairs(bridge)
-    print(f"\n{'physical':14} {'→':3} {'virtual':10} {'in':>5} {'out':>5}  verdict")
-    mismatches = 0
-    seen_virtual = set()
-    for phys, virt, xbox in sorted(pairs, key=lambda p: -phys_downs.get(p[0], 0)):
-        sent, got = phys_downs.get(phys, 0), virt_downs.get(virt, 0)
-        seen_virtual.add(virt)
-        verdict = "lossless" if sent == got else f"{sent - got:+d} ({abs(sent - got)} {'lost' if sent > got else 'extra'})"
-        mismatches += abs(sent - got)
-        if sent or got:
-            print(
-                f"{bridge._code_name(phys):14} →  {xbox:8} {sent:>5} {got:>5}  {verdict}"
-            )
-    unmapped = sum(v for k, v in virt_downs.items() if k not in seen_virtual)
-    if unmapped:
-        print(f"\n{unmapped} virtual down(s) from controls not in the button map (axis/hat).")
-    if axis_only:
-        print("axis-mapped controls are outside this diff: " + ", ".join(sorted(set(axis_only))))
+    profiles = load_profiles()
+    profile, how = choose_profile(bridge, profiles, ident, set(phys))
+    if profile is None:
+        print(f"  totals only ({how}): {sum(phys.values())} press(es) in / {sum(virt.values())} out")
+        return 0
+    print(f"  profile: {profile.get('name', '?')} [{how}]")
+
+    pairs, level_only = key_pairs(bridge, profile)
+    axis_targets = {virtual for _code, virtual, _xbox, kind in pairs if kind == "axis"}
+    rises = count_rises(bridge, lines, axis_targets)
+
+    # Aggregate by virtual control: several physical codes can share one target, and
+    # iterating physical codes would print that target once per button.
+    grouped: dict[int, dict] = {}
+    for code, virtual, xbox, kind in pairs:
+        entry = grouped.setdefault(virtual, {"xbox": xbox, "from": [], "in": 0, "kind": kind})
+        entry["from"].append(bridge._code_name(code))
+        entry["in"] += phys.get(code, 0)
+
+    missing = 0
+    print(f"  {'control':9}{'from':24}{'in':>5}{'out':>6}  verdict")
+    for virtual, entry in sorted(grouped.items(), key=lambda kv: -kv[1]["in"]):
+        sent = entry["in"]
+        got = rises.get(virtual, 0) if entry["kind"] == "axis" else virt.get(virtual, 0)
+        if not sent and not got:
+            continue
+        missing += abs(sent - got)
+        verdict = (
+            "lossless" if sent == got else f"{abs(sent - got)} {'lost' if sent > got else 'extra'}"
+        )
+        target = bridge._code_name(virtual) + (" (axis)" if entry["kind"] == "axis" else "")
+        print(
+            f"  {entry['xbox']:9}{', '.join(entry['from'])[:24]:24}{sent:>5}{got:>6}  {verdict}"
+            f"  → {target}"
+        )
+
+    outside = sum(v for k, v in virt.items() if k not in grouped)
+    if outside:
+        print(f"  {outside} virtual down(s) outside this pad's button map.")
+    if level_only:
+        print("  level state, no edge to count (axis in): " + ", ".join(sorted(set(level_only))))
     print(
-        f"\n{'EVERY press accounted for.' if mismatches == 0 else f'{mismatches} press(es) unaccounted for'}"
-        " — PHYS downs vs virtual downs, this session."
+        "\n" + ("EVERY press accounted for." if missing == 0 else f"{missing} press(es) unaccounted for.")
     )
-    print("note: PULSE lines are the recovery path (a physical 'up' the encoder lost).")
-    return 0
+    return missing
 
 
-def _name_to_code(bridge, name: str):
-    return None if bridge is None else bridge.resolve_code(name)
+def diag_run(seconds: float, wait: bool = True) -> int:
+    """Every physical press must show up as a virtual down.
+
+    The tool measures nothing on its own — the bridge writes the log while it runs in
+    diag mode — so this waits first (mash during the countdown) and then reports.
+    `--now` skips the wait and reads what is already in the file.
+    """
+    logs = diag_logs()
+    if not logs:
+        return _no_diag_log()
+
+    bridge = load_bridge_module()
+    if bridge is None:
+        print("cannot load the bridge module — no code tables, no per-button report", file=sys.stderr)
+        return 2
+
+    if wait:
+        print(f"Mash now: watching {seconds:.0f}s across {len(logs)} pad(s), then reporting.")
+        time.sleep(seconds)
+
+    return 0 if sum(report_pad(node, path, bridge) for node, path in logs) == 0 else 1
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--seconds", type=float, default=10.0, help="window to watch (default 10)")
-    parser.add_argument("--diag", action="store_true", help="diff PHYS in vs EMIT out from the diag log")
+    parser.add_argument(
+        "--diag",
+        action="store_true",
+        help="wait --seconds while you mash, then diff PHYS in vs virtual out, per pad",
+    )
+    parser.add_argument(
+        "--now", action="store_true", help="with --diag: report the log as it stands, no wait"
+    )
     parser.add_argument("--list", action="store_true", help="show the virtual pad nodes found")
     parser.add_argument("device", nargs="*", help="explicit /dev/input/eventN to watch")
     args = parser.parse_args(argv)
@@ -289,7 +456,7 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(f"{n} ({VIRTUAL_NAME})" for n in nodes) or "none found")
         return 0
     if args.diag:
-        return diag_report(args.seconds)
+        return diag_run(args.seconds, wait=not args.now)
 
     nodes = [Path(d) for d in args.device] if args.device else find_virtual_nodes()
     if not nodes:

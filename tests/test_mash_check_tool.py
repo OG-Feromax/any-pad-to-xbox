@@ -137,78 +137,187 @@ class TestPressTally:
 
 
 class TestDiagDiff:
-    """The strict PHYS-vs-virtual equivalence, joined on code numbers."""
+    """Per-pad PHYS-vs-virtual equivalence, joined on code numbers, scoped to one profile."""
 
-    PROFILE = {"0079:0006": {"evdev_keymap": {"BTN_THUMB": "a"}, "evdev_absmap": {"ABS_Y": "dpad_y"}}}
+    PROFILE = {
+        "0079:0006": {
+            "name": "DragonRise",
+            "evdev_keymap": {"BTN_THUMB": "a", "BTN_TOP": "x", "BTN_BASE2": "b"},
+            "evdev_absmap": {"ABS_Y": "dpad_y"},
+        },
+        # A second pad that shares the virtual code 305 for a different physical button.
+        # Reports must not mix the two.
+        "1b4f:9206": {"name": "SparkFun", "evdev_keymap": {"BTN_0": "b"}, "evdev_absmap": {}},
+    }
 
     @pytest.fixture
     def bridge(self, tool):
         return tool.load_bridge_module()
 
-    def names(self, bridge):
-        phys = bridge.resolve_code("BTN_THUMB")
-        virt = bridge.XBOX_BTN_CODES["a"]
-        return bridge._code_name(phys), bridge._code_name(virt)
-
-    def write_case(self, tool, monkeypatch, tmp_path, bridge, presses, emitted, pulse=0):
+    @pytest.fixture
+    def system(self, tool, monkeypatch, tmp_path):
+        """A /tmp-like dir with one attributed diag log and the profiles behind it."""
         profiles = tmp_path / "profiles.json"
-        profiles.write_text(
-            json.dumps({"version": 1, "profiles": self.PROFILE}), encoding="utf-8"
-        )
+        profiles.write_text(json.dumps({"version": 1, "profiles": self.PROFILE}), encoding="utf-8")
         monkeypatch.setattr(tool, "SYSTEM_PROFILES", profiles)
         monkeypatch.setattr(tool, "USER_PROFILES", tmp_path / "absent.json")
-        phys, virt = self.names(bridge)
+        monkeypatch.setattr(tool, "DIAG_DIR", tmp_path)
+        monkeypatch.setattr(tool, "DIAG_LEGACY", tmp_path / "legacy.diag")
+        monkeypatch.setattr(tool, "pad_id", lambda node: "0079:0006" if node == "event20" else None)
+        diag_dir = tmp_path
+        return diag_dir
+
+    def log_for(self, tool, tmp_path, bridge, presses, emitted, pulse=0, pad="0079:0006"):
+        """Build a log using the bridge's own name tables — the point of these tests."""
+        phys_names = {
+            "0079:0006": bridge._code_name(bridge.resolve_code("BTN_THUMB")),
+            "1b4f:9206": bridge._code_name(bridge.resolve_code("BTN_0")),
+        }[pad]
+        virt = bridge._code_name(bridge.XBOX_BTN_CODES["a"] if pad == "0079:0006" else bridge.XBOX_BTN_CODES["b"])
         lines = ["1.0 BRIDGE start pid=1"]
-        lines += [f"1.{i:03d} PHYS KEY {phys} down" for i in range(presses)]
+        lines += [f"1.{i:03d} PHYS KEY {phys_names} down" for i in range(presses)]
         lines += [f"1.{i:03d} EMIT KEY {virt} down" for i in range(emitted)]
         lines += [f"1.{i:03d} PULSE KEY {virt} down" for i in range(pulse)]
-        log = tmp_path / "bridge.diag"
-        log.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        monkeypatch.setattr(tool, "DIAG_LOG", log)
-        return log
+        path = tmp_path / "any-pad-bridge.event20.diag"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return path
 
-    def test_matching_counts_are_lossless(self, tool, monkeypatch, tmp_path, bridge, capsys):
-        self.write_case(tool, monkeypatch, tmp_path, bridge, presses=3, emitted=2, pulse=1)
-        assert tool.diag_report(10) == 0
+    def test_matching_counts_are_lossless(self, tool, system, tmp_path, bridge, capsys):
+        path = self.log_for(tool, tmp_path, bridge, presses=3, emitted=2, pulse=1)
+        assert tool.report_pad("event20", path, bridge) == 0
         out = capsys.readouterr().out
         assert "lossless" in out and "EVERY press accounted for." in out
+        assert "/dev/input/event20 [0079:0006]" in out
 
-    def test_pulse_lines_count_as_recognized_presses(self, tool, monkeypatch, tmp_path, bridge, capsys):
-        """Recovery is not a bug: down-while-held emits PULSE up+down and is still one press."""
-        self.write_case(tool, monkeypatch, tmp_path, bridge, presses=4, emitted=1, pulse=3)
-        tool.diag_report(10)
-        assert "EVERY press accounted for." in capsys.readouterr().out
-
-    def test_a_missing_emit_is_reported_as_lost(self, tool, monkeypatch, tmp_path, bridge, capsys):
-        self.write_case(tool, monkeypatch, tmp_path, bridge, presses=3, emitted=1)
-        tool.diag_report(10)
+    def test_other_pads_buttons_are_not_dragged_in(self, tool, system, tmp_path, bridge, capsys):
+        """The bug this replaced printed BTN_0 (another pad) as '21 extra' presses."""
+        path = self.log_for(tool, tmp_path, bridge, presses=2, emitted=2)
+        assert tool.report_pad("event20", path, bridge) == 0
         out = capsys.readouterr().out
-        assert "2 lost" in out and "2 press(es) unaccounted for" in out
+        assert "CODE_256" not in out and "SparkFun" not in out
 
-    def test_axis_mapped_controls_are_declared_out_of_scope(
-        self, tool, monkeypatch, tmp_path, bridge, capsys
+    def test_shared_virtual_code_is_counted_once(self, tool, system, tmp_path, bridge, capsys):
+        """Two physical buttons → one virtual target must be one row, sums added."""
+        lines = ["1.0 BRIDGE start pid=1"]
+        for name in ("BTN_THUMB", "BTN_TOP", "BTN_BASE2"):
+            code = bridge._code_name(bridge.resolve_code(name))
+            lines.append(f"1.001 PHYS KEY {code} down")
+        for btn in ("BTN_A", "BTN_X", "BTN_B"):
+            lines.append(f"1.002 EMIT KEY {btn} down")
+        path = tmp_path / "any-pad-bridge.event20.diag"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        assert tool.report_pad("event20", path, bridge) == 0
+
+    def test_a_missing_emit_is_reported_as_lost(self, tool, system, tmp_path, bridge, capsys):
+        path = self.log_for(tool, tmp_path, bridge, presses=3, emitted=1)
+        assert tool.report_pad("event20", path, bridge) == 2
+        out = capsys.readouterr().out
+        assert "2 lost" in out and "2 press(es) unaccounted for." in out
+
+    def test_axis_mapped_controls_are_declared_not_silently_dropped(
+        self, tool, system, tmp_path, bridge, capsys
     ):
-        self.write_case(tool, monkeypatch, tmp_path, bridge, presses=1, emitted=1)
-        tool.diag_report(10)
+        path = self.log_for(tool, tmp_path, bridge, presses=1, emitted=1)
+        tool.report_pad("event20", path, bridge)
         assert "ABS_Y→dpad_y" in capsys.readouterr().out
 
-    def test_stale_log_is_warned_about(self, tool, monkeypatch, tmp_path, bridge, capsys):
-        log = self.write_case(tool, monkeypatch, tmp_path, bridge, presses=1, emitted=1)
-        old = log.stat().st_mtime - 3600
-        os.utime(log, (old, old))
-        tool.diag_report(10)
+    def test_button_mapped_to_an_axis_counts_the_ramp(self, tool, system, tmp_path, bridge, capsys):
+        """A button on `lt` leaves as EV_ABS: counting only KEY output would call it lost."""
+        # `system` already points SYSTEM_PROFILES at this file; only the content changes.
+        (tmp_path / "profiles.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "profiles": {
+                        "0079:0006": {"name": "DR", "evdev_keymap": {"BTN_PINKIE": "lt"}}
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        phys = bridge._code_name(bridge.resolve_code("BTN_PINKIE"))
+        lines = ["1.0 BRIDGE start pid=1"]
+        for i in range(4):
+            lines.append(f"1.{i:03d} PHYS KEY {phys} down")
+            lines.append(f"1.{i:03d} EMIT ABS ABS_Z value=255")
+            lines.append(f"1.{i + 10:03d} EMIT ABS ABS_Z value=0")
+        path = tmp_path / "any-pad-bridge.event20.diag"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        assert tool.report_pad("event20", path, bridge) == 0
+        out = capsys.readouterr().out
+        assert "lossless" in out and "ABS_Z (axis)" in out
+
+    def test_legacy_log_is_attributed_when_only_one_profile_fits(
+        self, tool, system, tmp_path, bridge, capsys
+    ):
+        """No node in the filename, but the codes present belong to exactly one pad."""
+        (tmp_path / "legacy.diag").write_text(
+            "1.0 BRIDGE start pid=1\n"
+            "1.001 PHYS KEY BTN_THUMB down\n"
+            "1.002 EMIT KEY BTN_A down\n",
+            encoding="utf-8",
+        )
+        assert tool.diag_run(0, wait=False) == 0
+        out = capsys.readouterr().out
+        assert "inferred from the codes in the log" in out
+        assert "EVERY press accounted for." in out
+
+    def test_codes_no_profile_explains_refuse_to_guess(self, tool, system, tmp_path, capsys):
+        """BTN_THUMB and BTN_0 belong to different pads: no single profile covers both."""
+        (tmp_path / "legacy.diag").write_text(
+            "1.0 BRIDGE start pid=1\n"
+            "1.001 PHYS KEY BTN_THUMB down\n"
+            "1.002 PHYS KEY BTN_0 down\n",
+            encoding="utf-8",
+        )
+        assert tool.diag_run(0, wait=False) == 0
+        assert "totals only" in capsys.readouterr().out
+
+    def test_unresolvable_names_are_reported_not_dropped(self, tool, system, tmp_path, bridge, capsys):
+        path = tmp_path / "any-pad-bridge.event20.diag"
+        path.write_text(
+            "1.0 BRIDGE start pid=1\n1.001 PHYS KEY NOT_A_CODE down\n", encoding="utf-8"
+        )
+        tool.report_pad("event20", path, bridge)
+        assert "NOT_A_CODE" in capsys.readouterr().out
+
+    def test_log_without_presses_says_so(self, tool, system, tmp_path, bridge, capsys):
+        path = self.log_for(tool, tmp_path, bridge, presses=0, emitted=0)
+        assert tool.report_pad("event20", path, bridge) == 0
+        assert "no PHYS KEY lines" in capsys.readouterr().out
+
+    def test_stale_log_is_warned_about(self, tool, system, tmp_path, bridge, capsys):
+        path = self.log_for(tool, tmp_path, bridge, presses=1, emitted=1)
+        old = path.stat().st_mtime - 3600
+        os.utime(path, (old, old))
+        tool.report_pad("event20", path, bridge)
         assert "WARNING" in capsys.readouterr().out
 
-    def test_empty_log_explains_next_step(self, tool, monkeypatch, tmp_path, bridge, capsys):
-        log = self.write_case(tool, monkeypatch, tmp_path, bridge, presses=0, emitted=0)
-        log.write_text("1.0 BRIDGE start pid=1\n", encoding="utf-8")
-        assert tool.diag_report(10) == 1
-        assert "no PHYS KEY lines" in capsys.readouterr().err
+    def test_discovery_prefers_per_node_logs(self, tool, system, tmp_path, bridge):
+        self.log_for(tool, tmp_path, bridge, presses=1, emitted=1)
+        (tmp_path / "legacy.diag").write_text("1.0 BRIDGE start pid=1\n", encoding="utf-8")
+        assert tool.diag_logs(tmp_path) == [("event20", tmp_path / "any-pad-bridge.event20.diag")]
 
-    def test_missing_diag_log_tells_how_to_enable_it(self, tool, monkeypatch, tmp_path, capsys):
-        monkeypatch.setattr(tool, "DIAG_LOG", tmp_path / "absent.diag")
-        assert tool.diag_report(10) == 2
-        assert "ANY_PAD_DIAG_NO_GRAB=1" in capsys.readouterr().err
+    def test_diag_waits_by_default(self, tool, system, tmp_path, bridge, monkeypatch, capsys):
+        """This is what the user tripped on: --diag has to give time to mash."""
+        self.log_for(tool, tmp_path, bridge, presses=1, emitted=1)
+        slept = []
+        monkeypatch.setattr(tool.time, "sleep", lambda s: slept.append(s))
+        assert tool.diag_run(7, wait=True) == 0
+        assert slept == [7]
+        assert "Mash now" in capsys.readouterr().out
+
+    def test_now_skips_the_wait(self, tool, system, tmp_path, bridge, monkeypatch, capsys):
+        self.log_for(tool, tmp_path, bridge, presses=1, emitted=1)
+        slept = []
+        monkeypatch.setattr(tool.time, "sleep", lambda s: slept.append(s))
+        assert tool.diag_run(7, wait=False) == 0
+        assert slept == []
+
+    def test_no_log_at_all_explains_the_sequence(self, tool, system, tmp_path, capsys):
+        assert tool.diag_run(1, wait=False) == 2
+        err = capsys.readouterr().err
+        assert "ANY_PAD_DIAG_NO_GRAB=1" in err and "click Enable" in err
 
 
 class TestStuckDetection:

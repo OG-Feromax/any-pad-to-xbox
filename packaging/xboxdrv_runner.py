@@ -111,11 +111,14 @@ def main() -> int:
         "--profile-json",
         json.dumps(profile, separators=(",", ":")),
     ]
-    # Test-phase / explicit flag: allow PHYS+VIRT dual read for latency logs
+    # Test-phase / explicit flag: allow PHYS+VIRT dual read for latency logs.
+    # One file per event node: with two pads mapped, both bridges would open the same
+    # path with mode "w" and truncate each other's session.
     if DIAG_NO_GRAB_FLAG.exists():
+        diag_path = BRIDGE_DIAG_LOG.with_name(f"{BRIDGE_DIAG_LOG.stem}.{event}{BRIDGE_DIAG_LOG.suffix}")
         argv.append("--no-grab")
-        argv.extend(["--diag-log", str(BRIDGE_DIAG_LOG)])
-        log(f"diag: --no-grab + --diag-log {BRIDGE_DIAG_LOG}")
+        argv.extend(["--diag-log", str(diag_path)])
+        log(f"diag: --no-grab + --diag-log {diag_path}")
     log(
         "exec: "
         + " ".join(argv[:3])

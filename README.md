@@ -35,14 +35,14 @@ Every entry point that touches `/etc` renders the same script, so an install is 
 
 | you want | command |
 |---|---|
-| normal setup | **Install**, then **Apply** in the GUI |
-| re-apply after a `git pull` | `./scripts/any-pad-to-xbox --reapply` (or GUI **Apply**) |
+| normal setup | **Install**, then select a pad and **Enable** |
+| re-apply after a `git pull` | `./scripts/any-pad-to-xbox --reapply` (or **Enable** in the GUI) |
 | see exactly what root would run | `./scripts/any-pad-to-xbox --print-script` |
 | headless, for packagers | `sudo ./packaging/install-system.sh` |
 
 The two rule files that make up the integration are `/etc/udev/rules.d/99-any-pad-to-xbox.rules` (start the bridge for a mapped pad) and `/etc/udev/rules.d/65-any-pad-to-xbox-hide.rules` (keep that pad out of game controller lists).
 
-The status bar compares those installed files with what the app would write, so a `git pull` that changes rule generation shows up as **yellow — N system file(s) are behind this app** instead of sitting invisible behind a green bar. `--reapply` does the same check and refuses to ask for your password (or restart the bridge and blink the pad out of a running game) when there is nothing to write.
+The status bar compares those installed files with what the app would write, so a `git pull` that changes rule generation shows up as **yellow — N system file(s) are behind this app** instead of sitting invisible behind a green bar. `--reapply` does the same check and refuses to ask for your password (or restart the bridge and blink the pad out of a running game) when there is nothing to write. `Enable` always writes — it restarts your pad by design.
 
 ### Pad permissions
 
@@ -61,7 +61,7 @@ yay -S any-pad-to-xbox-git
 any-pad-to-xbox
 ```
 
-The package places the bridge, runner and systemd unit; the udev rules and `/etc/any-pad-to-xbox/profiles.json` depend on which pads *you* map, so open the app and hit **Install** once, then **Apply**.
+The package places the bridge, runner and systemd unit; the udev rules and `/etc/any-pad-to-xbox/profiles.json` depend on which pads *you* map, so open the app, hit **Install** once, then **Enable** on each pad.
 
 See [`docs/AUR.md`](docs/AUR.md) for the maintainer-side publish steps.
 
@@ -142,20 +142,26 @@ which maps directions to keys and therefore gets edge recovery.
 ./scripts/mash-check --seconds 10     # mash now; counts what the game receives
 ```
 
-That watches the virtual pad (no root) and prints presses per button, presses/s, the
-fastest gap, and anything left stuck down. For the strict side-by-side count:
+That watches the virtual pad and prints presses per button, presses/s, the fastest gap,
+and anything left stuck down. **Both modes wait for you** — nothing is measured by pressing
+after a report command finishes.
+
+For the strict side-by-side count you need diag mode, because the bridge normally holds an
+exclusive grab on the physical pad and nothing can observe it separately:
 
 ```bash
-ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox    # then Apply
-./scripts/mash-check --seconds 10                   # mash
-./scripts/mash-check --diag                         # PHYS in vs virtual out, per button
+ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox   # 1. start the app in diag mode
+# 2. select the pad, click Enable                  (asks for your password)
+./scripts/mash-check --diag --seconds 10           # 3. mash during the countdown
+# 4. Enable again without the variable to go back
 ```
 
-`--diag` reads `/tmp/any-pad-bridge.diag`, which only exists in diag mode — the one mode
-where the physical pad can be observed independently, since the bridge normally holds an
-exclusive grab on it. It joins the two sides on code numbers (a physical `BTN_THUMB` is a
-virtual `BTN_A`), and axis-mapped directions are declared out of scope rather than
-silently skipped.
+`--diag` reads `/tmp/any-pad-bridge.<event>.diag` — one file per mapped pad, since two
+bridges writing the same path would truncate each other. It joins the two sides on code
+numbers (a physical `BTN_THUMB` is a virtual `BTN_A`) and scopes itself to the profile of
+the pad that wrote the log; mixing in other pads' buttons invents losses that never
+happened. Axis-mapped directions are declared out of scope rather than skipped silently,
+and `--now` reports the log as it stands without waiting.
 
 ---
 
@@ -171,7 +177,7 @@ The bridge grabs the physical pad, so it emits nothing — but grabbing does not
 udevadm info -q property /dev/input/event20 | grep ID_INPUT
 ```
 
-A mapped physical pad should show `ID_INPUT=1` with **no** `ID_INPUT_JOYSTICK` line; the virtual Xbox pad keeps its tag. If the tag is still there, re-**Apply** (the rules on disk may predate your last pull).
+A mapped physical pad should show `ID_INPUT=1` with **no** `ID_INPUT_JOYSTICK` line; the virtual Xbox pad keeps its tag. If the tag is still there, **Enable** again (the rules on disk may predate your last pull).
 
 Two things this does **not** hide, and why:
 
@@ -184,13 +190,13 @@ One pad, one grabber: another remapper running at the same time (antimicrox, a S
 Expected for Enable / Disable / first Install. Not for clicking buttons on the diagram while mapping.
 
 **Reading the pad while it stays mapped (diagnostics)**
-The bridge grabs the pad exclusively, so the live preview can’t see it. Run with `ANY_PAD_DIAG_NO_GRAB=1` and hit **Apply** to have both read it:
+The bridge grabs the pad exclusively, so the live preview can’t see it. Run with `ANY_PAD_DIAG_NO_GRAB=1` and click **Enable** to have both read it:
 
 ```bash
 ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox
 ```
 
-That writes `/etc/any-pad-to-xbox/diag_no_grab`, which makes games see the physical pad again — debugging only. Apply once more without the variable to go back.
+That writes `/etc/any-pad-to-xbox/diag_no_grab`, which makes games see the physical pad again — debugging only. **Enable** once more without the variable to go back.
 
 **Disable the virtual pad**  
 Use **Disable** in the app.
