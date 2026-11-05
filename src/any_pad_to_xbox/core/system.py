@@ -13,6 +13,7 @@ from pathlib import Path
 from any_pad_to_xbox import (
     BRIDGE_PATH,
     DIAG_NO_GRAB,
+    DIAG_NO_GRAB_FLAG,
     RUNNER_PATH,
     SERVICE_PATH,
     SYSTEM_CONFIG_DIR,
@@ -47,6 +48,7 @@ class SystemStatus:
     in_input_group: bool
     details: list[str]
     stale_paths: list[Path] = field(default_factory=list)
+    diag_enabled: bool = False
 
     # Back-compat for older UI that checked xboxdrv_installed
     @property
@@ -94,17 +96,37 @@ def check_system() -> SystemStatus:
     # A git pull moves the code; it does not move /etc. Without this the two can sit
     # apart forever with nothing in the UI saying so.
     stale: list[Path] = []
+    # The mode is what the flag file says, independent of any drift: a no-grab bridge
+    # duplicates the pad in games whether or not this app agrees with it.
+    diag_enabled = DIAG_NO_GRAB_FLAG.exists()
+    diag_pending = False
     if integration:
         try:
-            stale = drift(_load_file(SYSTEM_PROFILES))
+            found = drift(_load_file(SYSTEM_PROFILES))
         except (OSError, ValueError):
-            stale = []
+            found = []
+        # The diagnostics flag is a mode someone switched on, not a file that went out
+        # of date. Listing it as "system files are behind this app" reads like an install
+        # problem and hides the thing that actually matters: the pad is not grabbed.
+        stale = [p for p in found if p != DIAG_NO_GRAB_FLAG]
+        diag_pending = DIAG_NO_GRAB_FLAG in found and not diag_enabled
         if stale:
             details.append(
                 f"System files are behind this app ({len(stale)}): "
                 + ", ".join(p.name for p in stale)
                 + " — click Enable."
             )
+    if diag_enabled:
+        details.append(
+            "Diagnostics mode is ON: the bridge is not grabbing the pad, so games list "
+            "the physical device next to the Xbox one. Enable again without "
+            "ANY_PAD_DIAG_NO_GRAB to go back to normal play."
+        )
+    elif diag_pending:
+        details.append(
+            "This app was started with ANY_PAD_DIAG_NO_GRAB, but /etc has no flag yet — "
+            "Enable writes it."
+        )
 
     return SystemStatus(
         bridge_installed=bridge_system or bridge_ok,
@@ -116,6 +138,7 @@ def check_system() -> SystemStatus:
         in_input_group=in_input,
         details=details,
         stale_paths=stale,
+        diag_enabled=diag_enabled,
     )
 
 

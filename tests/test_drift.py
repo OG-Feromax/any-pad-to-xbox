@@ -82,6 +82,9 @@ def fake_root(tmp_path, monkeypatch):
     monkeypatch.setattr(system, "SERVICE_PATH", unit)
     monkeypatch.setattr(system, "SYSTEM_CONFIG_DIR", etc)
     monkeypatch.setattr(system, "SYSTEM_PROFILES", profiles)
+    # Pinned: otherwise the host's real /etc/any-pad-to-xbox/diag_no_grab decides
+    # whether diagnostics show up, making these assertions machine-dependent.
+    monkeypatch.setattr(system, "DIAG_NO_GRAB_FLAG", etc / "diag_no_grab")
     return etc
 
 
@@ -186,6 +189,30 @@ class TestStatusWiring:
         assert status.integration_installed is True
         assert status.system_stale is False
 
+    def test_diagnostics_flag_is_reported_as_a_mode_not_a_stale_file(self, fake_root, monkeypatch):
+        """Calling diag_no_grab a "file behind this app" read like an install problem and
+        hid the fact that actually bites: the pad is not grabbed, so games see it twice."""
+        monkeypatch.setattr(system, "drift", lambda _p: [system.DIAG_NO_GRAB_FLAG])
+        fake_root.joinpath("diag_no_grab").write_text("", encoding="utf-8")
+        status = system.check_system()
+        assert status.diag_enabled is True
+        assert status.system_stale is False, "a mode is not an out-of-date file"
+        assert any("Diagnostics mode is ON" in d for d in status.details)
+        assert not any("behind this app" in d for d in status.details)
+
+    def test_diagnostics_shows_even_when_the_app_agrees_with_the_flag(self, fake_root):
+        """Started with the variable and flag written = no drift at all, but games still
+        double the pad. The warning cannot depend on a mismatch existing."""
+        fake_root.joinpath("diag_no_grab").write_text("", encoding="utf-8")
+        status = system.check_system()
+        assert status.diag_enabled is True
+
+    def test_env_on_without_the_flag_says_enable_writes_it(self, fake_root, monkeypatch):
+        monkeypatch.setattr(system, "drift", lambda _p: [system.DIAG_NO_GRAB_FLAG])
+        status = system.check_system()
+        assert status.diag_enabled is False
+        assert any("no flag yet" in d for d in status.details)
+
 
 class TestReapplyIsANoOpWhenClean:
     """`--reapply` restarts the bridge, which blinks the virtual pad out of a game."""
@@ -220,6 +247,21 @@ class TestReapplyIsANoOpWhenClean:
         out = capsys.readouterr().out
         assert "/etc/udev/rules.d/65-x.rules" in out
         assert len(calls) == 1, "expected exactly one privileged run"
+
+
+    def test_diagnostics_flag_is_labelled_as_a_mode_in_the_plan(self, monkeypatch, capsys):
+        """"Updating /etc/any-pad-to-xbox/diag_no_grab" alone reads like a corrupt file."""
+        from any_pad_to_xbox import __main__ as entry
+        from any_pad_to_xbox.core.installer import DIAG_NO_GRAB_FLAG
+
+        monkeypatch.setattr(installer, "drift", lambda *a, **k: [DIAG_NO_GRAB_FLAG])
+        monkeypatch.setattr(
+            installer,
+            "run_privileged",
+            lambda _script: subprocess.CompletedProcess(["pkexec"], 0, "OK\n", ""),
+        )
+        assert entry._cli_main(["--reapply"]) == 0
+        assert "diagnostics no-grab flag" in capsys.readouterr().out
 
 
 def _file(tmp_path, name):

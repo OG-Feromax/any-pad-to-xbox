@@ -26,6 +26,8 @@ def _level(status: SystemStatus) -> str:
         return "yellow"
     if status.system_stale:
         return "yellow"
+    if status.diag_enabled:
+        return "yellow"
     if not status.in_input_group:
         return "yellow"
     return "green"
@@ -166,6 +168,11 @@ class SystemStatusBar(QWidget):
             bits = []
             if not status.uinput_ok:
                 bits.append("Virtual controller support is missing (uinput).")
+            if status.diag_enabled:
+                bits.append(
+                    "Diagnostics mode is ON (the pad is not grabbed), so games list it "
+                    "twice — Enable without ANY_PAD_DIAG_NO_GRAB to play normally."
+                )
             if status.system_stale:
                 bits.append(
                     f"{len(status.stale_paths)} system file(s) are behind this app — "

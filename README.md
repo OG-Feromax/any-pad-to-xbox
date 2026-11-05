@@ -44,6 +44,8 @@ The two rule files that make up the integration are `/etc/udev/rules.d/99-any-pa
 
 The status bar compares those installed files with what the app would write, so a `git pull` that changes rule generation shows up as **yellow — N system file(s) are behind this app** instead of sitting invisible behind a green bar. `--reapply` does the same check and refuses to ask for your password (or restart the bridge and blink the pad out of a running game) when there is nothing to write. `Enable` always writes — it restarts your pad by design.
 
+Diagnostics mode is reported as a mode, not as a stale file: while `/etc/any-pad-to-xbox/diag_no_grab` exists the bar says **diagnostics mode is ON — games list the pad twice**, because that is true whether or not the app's environment agrees with it.
+
 ### Pad permissions
 
 If the pad doesn’t show up (or can’t be read), add yourself to the `input` group, then log out and back in:
@@ -242,7 +244,7 @@ The bridge grabs the pad exclusively, so the live preview can’t see it. Run wi
 ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox
 ```
 
-That writes `/etc/any-pad-to-xbox/diag_no_grab`, which makes games see the physical pad again — debugging only. **Enable** once more without the variable to go back.
+That writes `/etc/any-pad-to-xbox/diag_no_grab`, which makes games see the physical pad again — debugging only. **It is a mode, not a test run: it stays on across reboots of the app and the machine until you turn it off**, because the hotplug runner reads that file on every plug. Enable once more without the variable (or run `--reapply` without it) to go back.
 
 **Disable the virtual pad**  
 Use **Disable** in the app.

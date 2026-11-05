@@ -93,7 +93,15 @@ def _cli_main(argv: list[str]) -> int:
         # virtual pad out of any running game, to write bytes that are already there.
         print("System already matches this build — nothing to apply.")
         return 0
-    print(f"Updating {len(stale)} file(s):\n  " + "\n  ".join(str(p) for p in stale))
+    from any_pad_to_xbox import DIAG_NO_GRAB_FLAG
+
+    print(
+        f"Updating {len(stale)} file(s):\n  "
+        + "\n  ".join(
+            f"{p}  (diagnostics no-grab flag)" if p == DIAG_NO_GRAB_FLAG else str(p)
+            for p in stale
+        )
+    )
 
     result = run_privileged(script)
     if result.returncode != 0:
