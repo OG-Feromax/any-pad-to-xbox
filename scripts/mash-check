@@ -756,15 +756,27 @@ def estimate_poll_interval(gaps: list[float], tol_ms: float = 0.4) -> tuple[int 
     return best
 
 
-def poll_report(path: Path, offset: int | None, window: float) -> None:
+def poll_report(path: Path, offset: int | None, window: float) -> int:
+    """Print the cadence fit. Returns 1 when the log is too old to be a measurement."""
     lines, scope = read_since(path, offset, window)
     stamps = phys_timestamps(lines)
     gaps = report_gaps(stamps)
     header = next((l for l in lines if "BRIDGE start" in l), "(no BRIDGE start line)")
     print(f"\n{path.name}  counting {scope}\n  session: {header}")
+    stale = 0
+    if stamps:
+        age = time.time() - stamps[-1]
+        when = time.strftime("%H:%M:%S", time.localtime(stamps[-1]))
+        print(f"  newest event in this log: {when} ({age / 60:.0f} min ago)")
+        if age > 120:
+            print(
+                f"  STALE — nothing was pressed for {age / 60:.0f} min, so this is not a "
+                "measurement of the current settings."
+            )
+            stale = 1
     if len(gaps) < 20:
         print(f"  only {len(gaps)} inter-report gap(s) — press the pad and try again")
-        return
+        return 1
     interval, fit = estimate_poll_interval(gaps)
     ordered = sorted(gaps)
     print(f"  {len(stamps)} events, {len(gaps)} gaps (bursts inside one report excluded)")
@@ -783,6 +795,7 @@ def poll_report(path: Path, offset: int | None, window: float) -> None:
             )
     peaks = collections.Counter(round(g) for g in gaps).most_common(6)
     print("  most common gaps (ms): " + ", ".join(f"{g}×{c}" for g, c in peaks))
+    return stale
 
 
 def poll_run(seconds: float, wait: bool = True) -> int:
@@ -790,17 +803,33 @@ def poll_run(seconds: float, wait: bool = True) -> int:
 
     The number that dominates the latency chain, and the one to re-measure after
     changing `usbhid jspoll` — before/after in two runs.
+
+    Refuses to pass a dead log off as data: nothing is written while the bridge holds its
+    exclusive grab, so waiting a countdown over a stale file would only re-print the last
+    time the pad happened to be measured.
     """
     logs = diag_logs()
     if not logs:
         return _no_diag_log()
-    marks = {node: path.stat().st_size for node, path in logs} if wait else {}
+
     if wait:
+        if not any(time.time() - path.stat().st_mtime < 60 for _node, path in logs):
+            print(
+                "nothing is writing these logs right now, so a countdown would only "
+                "re-read an old session.\n"
+                "The bridge must run without its exclusive grab to log the physical side:\n"
+                "  1. ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox\n"
+                "  2. Enable                                    (asks for your password)\n"
+                "  3. ./scripts/mash-check --poll --seconds 10   and press the pad\n"
+                "Use --now only when you mean 'show me the old session'.",
+                file=sys.stderr,
+            )
+            return 2
         print(f"Mash now: measuring the report cadence for {seconds:.0f}s.")
         time.sleep(seconds)
-    for node, path in logs:
-        poll_report(path, marks.get(node), seconds)
-    return 0
+
+    marks = {node: path.stat().st_size for node, path in logs} if wait else {}
+    return max(poll_report(path, marks.get(node), seconds) for node, path in logs)
 
 
 def main(argv: list[str] | None = None) -> int:

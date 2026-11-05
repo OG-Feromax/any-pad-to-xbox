@@ -479,6 +479,43 @@ class TestPollIntervalEstimate:
         tool.poll_report(tmp_path / "x.diag", None, 0)
         assert "press the pad and try again" in capsys.readouterr().out
 
+    def test_an_old_log_is_called_stale_not_reported_as_a_result(
+        self, tool, tmp_path, monkeypatch, capsys
+    ):
+        """The trap he hit: --now on a log from before the change reads like a measurement."""
+        now = tool.time.time()
+        monkeypatch.setattr(tool, "read_since", lambda path, offset, window=0: (
+            ["1.0 BRIDGE start pid=1"]
+            + [f"{now - 3600 + i * 0.008:.6f} PHYS KEY BTN_THUMB down" for i in range(60)],
+            "the whole session",
+        ))
+        assert tool.poll_report(tmp_path / "x.diag", None, 0) == 1
+        out = capsys.readouterr().out
+        assert "STALE" in out and "60 min ago" in out
+
+    def test_poll_refuses_to_wait_over_a_log_nothing_is_writing(
+        self, tool, tmp_path, monkeypatch, capsys
+    ):
+        dead = tmp_path / "any-pad-bridge.event20.diag"
+        dead.write_text("1.0 BRIDGE start pid=1\n", encoding="utf-8")
+        old = os.stat(dead).st_mtime - 3600
+        os.utime(dead, (old, old))
+        monkeypatch.setattr(tool, "DIAG_DIR", tmp_path)
+        monkeypatch.setattr(tool, "DIAG_LEGACY", tmp_path / "absent.diag")
+        assert tool.poll_run(10, wait=True) == 2
+        assert "nothing is writing these logs" in capsys.readouterr().err
+
+    def test_poll_waits_when_a_logger_is_live(self, tool, tmp_path, monkeypatch, capsys):
+        live = tmp_path / "any-pad-bridge.event20.diag"
+        live.write_text("1.0 BRIDGE start pid=1\n", encoding="utf-8")
+        monkeypatch.setattr(tool, "DIAG_DIR", tmp_path)
+        monkeypatch.setattr(tool, "DIAG_LEGACY", tmp_path / "absent.diag")
+        slept = []
+        monkeypatch.setattr(tool.time, "sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(tool, "poll_report", lambda *a, **k: 0)
+        assert tool.poll_run(5, wait=True) == 0
+        assert slept == [5]
+
 
 class TestGrabDetection:
     """--latency needs to read the physical node, which is impossible under the grab.
