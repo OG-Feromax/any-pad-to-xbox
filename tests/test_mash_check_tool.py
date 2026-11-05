@@ -460,61 +460,162 @@ class TestPollIntervalEstimate:
     def test_no_gaps_is_not_an_interval(self, tool):
         assert tool.estimate_poll_interval([]) == (None, 0.0)
 
-    def test_report_prints_the_interval_and_the_sample_size(
-        self, tool, tmp_path, monkeypatch, capsys
-    ):
-        monkeypatch.setattr(tool, "read_since", lambda path, offset, window=0: (
-            ["1.0 BRIDGE start pid=1"]
-            + [f"{1 + i * 0.008:.6f} PHYS KEY BTN_THUMB down" for i in range(60)],
-            "the whole session",
-        ))
-        tool.poll_report(tmp_path / "any-pad-bridge.event20.diag", None, 0)
+    def test_report_prints_the_interval_and_the_sample_size(self, tool, tmp_path, capsys):
+        log = tmp_path / "any-pad-bridge.event20.diag"
+        log.write_text(
+            "1.0 BRIDGE start pid=1\n"
+            + "".join(f"{1 + i * 0.008:.6f} PHYS KEY BTN_THUMB down\n" for i in range(60)),
+            encoding="utf-8",
+        )
+        tool.poll_report(log, None, 0)
         out = capsys.readouterr().out
         assert "poll interval: 8 ms (125 Hz)" in out
         assert "60 events" in out
 
-    def test_thin_data_says_so_instead_of_guessing(self, tool, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(tool, "read_since", lambda path, offset, window=0: (
-            ["1.0 BRIDGE start pid=1", "1.008 PHYS KEY BTN_THUMB down"], "the whole session"))
-        tool.poll_report(tmp_path / "x.diag", None, 0)
+    def test_thin_data_says_so_instead_of_guessing(self, tool, tmp_path, capsys):
+        log = tmp_path / "x.diag"
+        log.write_text(
+            "1.0 BRIDGE start pid=1\n1.008 PHYS KEY BTN_THUMB down\n", encoding="utf-8"
+        )
+        assert tool.poll_report(log, None, 0) == 1
         assert "press the pad and try again" in capsys.readouterr().out
 
-    def test_an_old_log_is_called_stale_not_reported_as_a_result(
-        self, tool, tmp_path, monkeypatch, capsys
-    ):
-        """The trap he hit: --now on a log from before the change reads like a measurement."""
+    def test_presses_outside_the_window_are_named_not_hidden(self, tool, tmp_path, capsys):
+        """What actually happened to him: he pressed, the window missed it, output said 0."""
+        body = "".join(f"{1 + i * 0.008:.6f} PHYS KEY BTN_THUMB down\n" for i in range(40))
+        log = tmp_path / "any-pad-bridge.event20.diag"
+        log.write_text("1.0 BRIDGE start pid=1\n" + body, encoding="utf-8")
+        offset = len("1.0 BRIDGE start pid=1\n") + len(body)
+
+        assert tool.poll_report(log, offset, 10) == 1
+        out = capsys.readouterr().out
+        assert "40 event(s) from *before* the window" in out
+        assert "you pressed, just not while it counted" in out
+
+    def test_an_old_log_is_called_stale_not_reported_as_a_result(self, tool, tmp_path, capsys):
+        """The trap --now creates: a log from before the change reads like a measurement."""
         now = tool.time.time()
-        monkeypatch.setattr(tool, "read_since", lambda path, offset, window=0: (
-            ["1.0 BRIDGE start pid=1"]
-            + [f"{now - 3600 + i * 0.008:.6f} PHYS KEY BTN_THUMB down" for i in range(60)],
-            "the whole session",
-        ))
-        assert tool.poll_report(tmp_path / "x.diag", None, 0) == 1
+        log = tmp_path / "any-pad-bridge.event20.diag"
+        log.write_text(
+            "1.0 BRIDGE start pid=1\n"
+            + "".join(
+                f"{now - 3600 + i * 0.008:.6f} PHYS KEY BTN_THUMB down\n" for i in range(60)
+            ),
+            encoding="utf-8",
+        )
+        assert tool.poll_report(log, None, 0) == 1
         out = capsys.readouterr().out
         assert "STALE" in out and "60 min ago" in out
 
-    def test_poll_refuses_to_wait_over_a_log_nothing_is_writing(
-        self, tool, tmp_path, monkeypatch, capsys
-    ):
-        dead = tmp_path / "any-pad-bridge.event20.diag"
-        dead.write_text("1.0 BRIDGE start pid=1\n", encoding="utf-8")
-        old = os.stat(dead).st_mtime - 3600
-        os.utime(dead, (old, old))
+    def test_poll_refuses_when_diag_mode_is_off(self, tool, tmp_path, monkeypatch, capsys):
+        """A countdown over a log nothing can write would only re-read an old session."""
+        log = tmp_path / "any-pad-bridge.event20.diag"
+        log.write_text("1.0 BRIDGE start pid=1\n", encoding="utf-8")
         monkeypatch.setattr(tool, "DIAG_DIR", tmp_path)
         monkeypatch.setattr(tool, "DIAG_LEGACY", tmp_path / "absent.diag")
+        monkeypatch.setattr(tool, "DIAG_FLAG", tmp_path / "nope")
         assert tool.poll_run(10, wait=True) == 2
-        assert "nothing is writing these logs" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "no exclusive grab" in err and "ANY_PAD_DIAG_NO_GRAB=1" in err
+
+    def test_an_armed_but_idle_logger_waits_instead_of_refusing(self, tool, tmp_path, monkeypatch, capsys):
+        """Idle is not the same as dead: the logger writes the moment he presses."""
+        log = tmp_path / "any-pad-bridge.event20.diag"
+        log.write_text("1.0 BRIDGE start pid=1\n", encoding="utf-8")
+        old = os.stat(log).st_mtime - 3600
+        os.utime(log, (old, old))
+        flag = tmp_path / "diag_flag"
+        flag.write_text("", encoding="utf-8")
+        monkeypatch.setattr(tool, "DIAG_DIR", tmp_path)
+        monkeypatch.setattr(tool, "DIAG_LEGACY", tmp_path / "absent.diag")
+        monkeypatch.setattr(tool, "DIAG_FLAG", flag)
+        monkeypatch.setattr(tool, "_countdown", lambda *a, **k: None)
+        monkeypatch.setattr(tool, "poll_report", lambda path, offset, window: 0)
+        assert tool.poll_run(10, wait=True) == 0
+        assert "armed but idle" in capsys.readouterr().out
 
     def test_poll_waits_when_a_logger_is_live(self, tool, tmp_path, monkeypatch, capsys):
+        """Delegates the wait to _countdown (whose ticks are tested separately). The marks
+        must be taken *before* the wait — that is what scopes the report to the window."""
         live = tmp_path / "any-pad-bridge.event20.diag"
-        live.write_text("1.0 BRIDGE start pid=1\n", encoding="utf-8")
+        header = "1.0 BRIDGE start pid=1\n"
+        live.write_text(header, encoding="utf-8")
+        flag = tmp_path / "diag_flag"
+        flag.write_text("", encoding="utf-8")
         monkeypatch.setattr(tool, "DIAG_DIR", tmp_path)
         monkeypatch.setattr(tool, "DIAG_LEGACY", tmp_path / "absent.diag")
-        slept = []
-        monkeypatch.setattr(tool.time, "sleep", lambda s: slept.append(s))
-        monkeypatch.setattr(tool, "poll_report", lambda *a, **k: 0)
+        monkeypatch.setattr(tool, "DIAG_FLAG", flag)
+        seen = {}
+
+        def fake_countdown(seconds, logs, marks, **kwargs):
+            seen["seconds"] = seconds
+            seen["marks"] = dict(marks)
+
+        def fake_report(path, offset, window):
+            seen["offset"] = offset
+            return 0
+
+        monkeypatch.setattr(tool, "_countdown", fake_countdown)
+        monkeypatch.setattr(tool, "poll_report", fake_report)
         assert tool.poll_run(5, wait=True) == 0
-        assert slept == [5]
+        assert seen["seconds"] == 5
+        assert seen["marks"] == {"event20": len(header)}  # marked before any pressing
+        assert seen["offset"] == len(header)
+        assert "press the pad continuously for 5s" in capsys.readouterr().out
+
+
+class FakeClock:
+    """Time that only moves when the code sleeps, and can do work as it does."""
+
+    def __init__(self, on_first_sleep=None):
+        self.now = 0.0
+        self.slept = []
+        self.on_first_sleep = on_first_sleep
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        first = not self.slept
+        self.slept.append(seconds)
+        self.now += seconds
+        if first and self.on_first_sleep:
+            self.on_first_sleep()
+
+
+class TestCountdownFeedback:
+    """A silent sleep is why his presses fell outside the window."""
+
+    def test_it_reports_bytes_written_during_the_wait(self, tool, tmp_path, capsys):
+        path = tmp_path / "any-pad-bridge.event20.diag"
+        path.write_text("x" * 10, encoding="utf-8")
+        clock = FakeClock(on_first_sleep=lambda: path.write_text("x" * 500, encoding="utf-8"))
+
+        tool._countdown(3, [("event20", path)], {"event20": 10}, clock=clock, tick=1.0)
+
+        out = capsys.readouterr().out
+        assert "2s left, 490 bytes logged" in out
+        assert "0s left, 490 bytes logged" in out
+
+    def test_it_counts_nothing_written_as_nothing_written(self, tool, tmp_path, capsys):
+        """The useful signal he lacked: 0 bytes means he did not press in the window."""
+        path = tmp_path / "any-pad-bridge.event20.diag"
+        path.write_text("x" * 10, encoding="utf-8")
+        clock = FakeClock()
+
+        tool._countdown(2, [("event20", path)], {"event20": 10}, clock=clock, tick=1.0)
+
+        assert "0 bytes logged" in capsys.readouterr().out
+
+    def test_it_never_prints_a_negative_countdown(self, tool, tmp_path, capsys):
+        path = tmp_path / "any-pad-bridge.event20.diag"
+        path.write_text("", encoding="utf-8")
+        clock = FakeClock()
+
+        tool._countdown(1.5, [("event20", path)], {"event20": 0}, clock=clock, tick=1.0)
+
+        out = capsys.readouterr().out
+        assert "0s left" in out and "-1s" not in out
 
 
 class TestGrabDetection:

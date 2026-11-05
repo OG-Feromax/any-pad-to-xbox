@@ -52,6 +52,8 @@ EV_SYN, EV_KEY, EV_ABS = 0x00, 0x01, 0x03
 DIAG_DIR = Path("/tmp")
 DIAG_LEGACY = Path("/tmp/any-pad-bridge.diag")
 DIAG_LOG = DIAG_LEGACY  # pre-per-node builds
+# The bridge logs only while it runs without its exclusive grab, which this flag asks for.
+DIAG_FLAG = Path("/etc/any-pad-to-xbox/diag_no_grab")
 SYSTEM_PROFILES = Path("/etc/any-pad-to-xbox/profiles.json")
 USER_PROFILES = Path.home() / ".config" / "any-pad-to-xbox" / "profiles.json"
 BRIDGE_CANDIDATES = (
@@ -756,12 +758,33 @@ def estimate_poll_interval(gaps: list[float], tol_ms: float = 0.4) -> tuple[int 
     return best
 
 
+def _countdown(seconds: float, logs, marks, clock=time, tick: float = 1.0) -> None:
+    """Count down while showing that the log is actually growing.
+
+    A silent sleep made "mash now" un-pressable: with no feedback there is no way to tell
+    the window from the minutes around it, so presses landed outside it and the result came
+    back empty -- which read like a broken tool rather than like mistimed input.
+    """
+    deadline = clock.monotonic() + seconds
+    while True:
+        left = deadline - clock.monotonic()
+        if left <= 0:
+            return
+        clock.sleep(min(tick, left))
+        written = sum(max(0, path.stat().st_size - marks.get(node, 0)) for node, path in logs)
+        print(f"  … {max(0.0, left - tick):.0f}s left, {written} bytes logged", flush=True)
+
+
 def poll_report(path: Path, offset: int | None, window: float) -> int:
     """Print the cadence fit. Returns 1 when the log is too old to be a measurement."""
     lines, scope = read_since(path, offset, window)
     stamps = phys_timestamps(lines)
     gaps = report_gaps(stamps)
-    header = next((l for l in lines if "BRIDGE start" in l), "(no BRIDGE start line)")
+    whole = path.read_text(encoding="utf-8").splitlines()
+    header = next((l for l in lines if "BRIDGE start" in l), "")
+    if not header:
+        # The window began after the bridge started, so the header is behind the offset.
+        header = next((l for l in whole if "BRIDGE start" in l), "(no BRIDGE start line)")
     print(f"\n{path.name}  counting {scope}\n  session: {header}")
     stale = 0
     if stamps:
@@ -776,6 +799,15 @@ def poll_report(path: Path, offset: int | None, window: float) -> int:
             stale = 1
     if len(gaps) < 20:
         print(f"  only {len(gaps)} inter-report gap(s) — press the pad and try again")
+        if offset is not None:
+            outside = max(0, len(phys_timestamps(whole)) - len(stamps))
+            if outside:
+                print(
+                    f"  note: this session holds {outside} event(s) from *before* the window — "
+                    "you pressed, just not while it counted.\n"
+                    "         Re-run and press during the countdown, or use --now for the "
+                    "whole session."
+                )
         return 1
     interval, fit = estimate_poll_interval(gaps)
     ordered = sorted(gaps)
@@ -813,22 +845,25 @@ def poll_run(seconds: float, wait: bool = True) -> int:
         return _no_diag_log()
 
     if wait:
-        if not any(time.time() - path.stat().st_mtime < 60 for _node, path in logs):
+        if not DIAG_FLAG.exists():
             print(
-                "nothing is writing these logs right now, so a countdown would only "
-                "re-read an old session.\n"
-                "The bridge must run without its exclusive grab to log the physical side:\n"
+                "the bridge only logs the physical side while it has no exclusive grab, and "
+                f"{DIAG_FLAG} is not set:\n"
                 "  1. ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox\n"
                 "  2. Enable                                    (asks for your password)\n"
-                "  3. ./scripts/mash-check --poll --seconds 10   and press the pad\n"
-                "Use --now only when you mean 'show me the old session'.",
+                "  3. ./scripts/mash-check --poll --seconds 20   and press during the count\n"
+                "Use --now to read whatever an earlier diag session already recorded.",
                 file=sys.stderr,
             )
             return 2
-        print(f"Mash now: measuring the report cadence for {seconds:.0f}s.")
-        time.sleep(seconds)
+        marks = {node: path.stat().st_size for node, path in logs}
+        if not any(time.time() - path.stat().st_mtime < 60 for _node, path in logs):
+            print("logger is armed but idle — press during the countdown below.")
+        print(f"Mash now — press the pad continuously for {seconds:.0f}s:")
+        _countdown(seconds, logs, marks)
+    else:
+        marks = {}
 
-    marks = {node: path.stat().st_size for node, path in logs} if wait else {}
     return max(poll_report(path, marks.get(node), seconds) for node, path in logs)
 
 
