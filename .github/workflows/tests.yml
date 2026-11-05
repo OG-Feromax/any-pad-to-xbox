@@ -25,5 +25,11 @@ jobs:
       - name: Install test dependencies
         run: uv sync --no-default-groups --group dev
 
+      # Undefined names are invisible to a test suite unless the line happens to be
+      # exercised: mash-check referenced EV_ABS without defining it, and NameError fired on
+      # real hardware -- on the dpad path -- while every test stayed green.
+      - name: Check for undefined names
+        run: uv run pyflakes src packaging scripts tests
+
       - name: Run tests
         run: uv run pytest -q

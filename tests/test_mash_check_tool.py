@@ -363,6 +363,59 @@ class TestDiagDiff:
         assert "ANY_PAD_DIAG_NO_GRAB=1" in err and "click Enable" in err
 
 
+class TestRiseTally:
+    """Classifying frames into presses on each side.
+
+    This path is what crashed on real hardware: the tool used EV_ABS without ever defining
+    it, so the first dpad or trigger event raised NameError. Nothing else exercised it --
+    the live run had no events at all, which is why "no samples" looked like a pass.
+    """
+
+    def test_ev_abs_is_a_real_constant(self, tool):
+        assert (tool.EV_SYN, tool.EV_KEY, tool.EV_ABS) == (0x00, 0x01, 0x03)
+
+    def test_physical_key_rise_goes_to_the_physical_side(self, tool):
+        phys, virt = tool.tally_rises([("phys", 1.0, tool.EV_KEY, 304, 1)], set())
+        assert phys == [(1.0, 304)] and virt == []
+
+    def test_axis_ramp_counts_as_one_press_not_one_per_value(self, tool):
+        frames = [
+            ("virt", 1.0, tool.EV_ABS, 0x02, 90),
+            ("virt", 1.1, tool.EV_ABS, 0x02, 200),
+            ("virt", 1.2, tool.EV_ABS, 0x02, 255),
+            ("virt", 1.3, tool.EV_ABS, 0x02, 0),
+            ("virt", 1.4, tool.EV_ABS, 0x02, 255),
+        ]
+        _phys, virt = tool.tally_rises(frames, {0x02})
+        assert [ts for ts, _code in virt] == [1.0, 1.4]
+
+    def test_axis_values_outside_the_map_are_ignored(self, tool):
+        _phys, virt = tool.tally_rises([("virt", 1.0, tool.EV_ABS, 0x00, 255)], {0x02})
+        assert virt == []
+
+    def test_releases_and_autorepeat_are_not_presses(self, tool):
+        frames = [
+            ("phys", 1.0, tool.EV_KEY, 304, 0),
+            ("phys", 1.1, tool.EV_KEY, 304, 2),
+            ("phys", 1.2, tool.EV_SYN, 0, 0),
+        ]
+        phys, _virt = tool.tally_rises(frames, set())
+        assert phys == []
+
+    def test_end_to_end_pairing_from_frames(self, tool):
+        """Frames in, latency out — the shape --latency actually reports."""
+        frames = [
+            ("phys", 1.000, tool.EV_KEY, 289, 1),
+            ("virt", 1.006, tool.EV_KEY, 304, 1),
+            ("phys", 2.000, tool.EV_KEY, 293, 1),
+            ("virt", 2.010, tool.EV_ABS, 0x02, 255),
+        ]
+        phys, virt = tool.tally_rises(frames, {0x02})
+        deltas, lost = tool.pair_latencies(phys, virt, {289: 304, 293: 0x02})
+        assert deltas == [pytest.approx(6.0), pytest.approx(10.0)]
+        assert lost == 0
+
+
 class TestLatencyPairing:
     """The number he asked for: delay from the physical event to the virtual one."""
 

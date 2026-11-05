@@ -44,7 +44,7 @@ from pathlib import Path
 
 EVENT_FMT = "llHHi"
 EVENT_SIZE = struct.calcsize(EVENT_FMT)
-EV_SYN, EV_KEY = 0x00, 0x01
+EV_SYN, EV_KEY, EV_ABS = 0x00, 0x01, 0x03
 
 DIAG_DIR = Path("/tmp")
 DIAG_LEGACY = Path("/tmp/any-pad-bridge.diag")
@@ -601,14 +601,29 @@ def measure_latency(seconds: float, device: str | None) -> int:
     return 0 if all_deltas else 1
 
 
+def tally_rises(events, axis_codes: set[int]) -> tuple[list, list]:
+    """Split (label, ts, etype, code, value) frames into (physical rises, virtual rises).
+
+    A virtual "press" is either an EV_KEY down or a 0→nonzero ramp on an axis target,
+    because a button mapped to lt/rt leaves the bridge as EV_ABS.
+    """
+    phys: list[tuple[float, int]] = []
+    virt: list[tuple[float, int]] = []
+    axis_last: dict[int, int] = {}
+    for label, ts, etype, code, value in events:
+        if etype == EV_KEY and value == 1:
+            (phys if label == "phys" else virt).append((ts, code))
+        elif label == "virt" and etype == EV_ABS and code in axis_codes:
+            if value and not axis_last.get(code, 0):
+                virt.append((ts, code))
+            axis_last[code] = value
+    return phys, virt
+
+
 def collect_rises(
     phys_node: Path, virt_node: Path, seconds: float, axis_codes: set[int]
 ):
-    """(physical rises, virtual rises) with kernel timestamps, for one window.
-
-    Axis targets are included in the virtual side because a button mapped to lt/rt leaves
-    the bridge as an EV_ABS ramp: its press is a 0→nonzero transition, not an EV_KEY.
-    """
+    """(physical rises, virtual rises) with kernel timestamps, for one window."""
     fds = {}
     for label, node in (("phys", phys_node), ("virt", virt_node)):
         try:
@@ -618,25 +633,17 @@ def collect_rises(
             for handle in fds.values():
                 os.close(handle)
             return [], []
-    phys: list[tuple[float, int]] = []
-    virt: list[tuple[float, int]] = []
-    axis_last: dict[int, int] = {}
+    frames = []
     try:
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             for fd in _select(list(fds.values())):
                 label = next(k for k, v in fds.items() if v == fd)
-                for ts, etype, code, value in _drain(fd):
-                    if etype == EV_KEY and value == 1:
-                        (phys if label == "phys" else virt).append((ts, code))
-                    elif label == "virt" and etype == EV_ABS and code in axis_codes:
-                        if value and not axis_last.get(code, 0):
-                            virt.append((ts, code))
-                        axis_last[code] = value
+                frames.extend((label, *event) for event in _drain(fd))
     finally:
         for handle in fds.values():
             os.close(handle)
-    return phys, virt
+    return tally_rises(frames, axis_codes)
 
 
 def main(argv: list[str] | None = None) -> int:

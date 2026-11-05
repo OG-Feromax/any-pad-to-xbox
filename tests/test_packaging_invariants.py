@@ -8,7 +8,6 @@ here.
 
 from __future__ import annotations
 
-import ast
 import sys
 from pathlib import Path
 
@@ -16,7 +15,7 @@ import pytest
 
 from conftest import make_profile, root_imports
 
-from any_pad_to_xbox import BRIDGE_PATH, RUNNER_PATH, SERVICE_PATH, UDEV_RULES_PATH
+from any_pad_to_xbox import BRIDGE_PATH, RUNNER_PATH, SERVICE_PATH
 from any_pad_to_xbox.core.installer import render_install_script
 from any_pad_to_xbox.core.udev import generate_udev_rules
 

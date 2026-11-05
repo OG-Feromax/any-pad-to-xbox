@@ -35,6 +35,7 @@ package = true
 [dependency-groups]
 dev = [
     "pytest>=9.2.0",
+    "pyflakes>=3.3.0",
 ]
 
 [tool.pytest.ini_options]
