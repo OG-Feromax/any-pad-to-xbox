@@ -160,27 +160,34 @@ only; expect well under a millisecond. The rest of the chain is not the bridge's
 A wired pad pays the USB poll and the frame wait whether or not this bridge is in the path,
 so the honest comparison is the middle rows, not the total.
 
-Because the poll interval is the biggest item, it is the one worth measuring — and the one
-you can change. `--poll` reads the same diag log and fits the lattice of inter-report gaps
-(idle stretches and same-report bursts are both excluded, and the answer names the largest
-interval that fits rather than the smallest, since every multiple of 8 is also a multiple of
-1):
+Because the poll interval is the biggest item, it is the one worth measuring. `--poll`
+reads the same diag log and fits the lattice of inter-report gaps (idle stretches and
+same-report bursts are both excluded, and the answer names the largest interval that fits
+rather than the smallest, since every multiple of 8 is also a multiple of 1):
 
 ```bash
 ./scripts/mash-check --poll --now          # fits the log as it stands
 ```
 
-To try shortening it, override the driver's interval and re-measure:
+Measured on a DragonRise `0079:0006` (low-speed, descriptor `bInterval=10`): the lattice
+comes out at **8 ms / 125 Hz, three sessions in a row**, and two attempts to beat it failed:
+
+| tried | result |
+|---|---|
+| `usbhid jspoll=1`, then replug (so the probe sees it) | still 8 ms, smallest gap 15,92 ms |
+| move the pad from behind two chained hubs to one | still 8 ms, same numbers |
+
+So treat ~8 ms as this class of stick's floor, not a setting to tune, and revert what you
+turned on:
 
 ```bash
-sudo sh -c 'echo 1 > /sys/module/usbhid/parameters/jspoll'
-# unplug and replug the pad — usbhid reads the parameter at probe time, not on a live device
-./scripts/mash-check --poll --now
+sudo sh -c 'echo 0 > /sys/module/usbhid/parameters/jspoll'   # does nothing here; a reboot clears it anyway
 ```
 
-Replug matters, and so does the hub: behind a transaction translator the device may not
-actually reach 1 ms. A shorter interval costs roughly one URB per millisecond on that port.
-To keep it across boots, put `options usbhid jspoll=1` in `/etc/modprobe.d/usbhid.conf`.
+One variable is genuinely untested: a port with **no** hub in front of the pad at all. Going
+from two hubs to one changed nothing, so the likely remaining cause is the host rounding
+low-speed interrupt intervals, which no port choice fixes. If you want to close that
+question anyway, the method is: change exactly one thing, replug, `--poll`, compare.
 
 ### Measuring it on your own pad
 
