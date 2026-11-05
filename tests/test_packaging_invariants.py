@@ -14,10 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_profile
+from conftest import make_profile, root_imports
 
 from any_pad_to_xbox import BRIDGE_PATH, RUNNER_PATH, SERVICE_PATH, UDEV_RULES_PATH
-from any_pad_to_xbox.core.system import generate_udev_rules
+from any_pad_to_xbox.core.installer import render_install_script
+from any_pad_to_xbox.core.udev import generate_udev_rules
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGING = REPO_ROOT / "packaging"
@@ -25,17 +26,6 @@ PACKAGING = REPO_ROOT / "packaging"
 BRIDGE = PACKAGING / "xpad_bridge.py"
 RUNNER = PACKAGING / "xboxdrv_runner.py"
 UNIT = PACKAGING / "xboxdrv@.service"
-
-
-def root_imports(path: Path) -> set[str]:
-    """Top-level module names imported by a file (relative imports ignored)."""
-    names: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.Import):
-            names.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and not node.level:
-            names.add((node.module or "").split(".")[0])
-    return {n for n in names if n}
 
 
 @pytest.mark.parametrize("script", [BRIDGE, RUNNER], ids=lambda p: p.name)
@@ -73,10 +63,22 @@ class TestPathContracts:
         assert SERVICE_PATH.name.removesuffix(".service") in rules
         assert f"{SERVICE_PATH.name.removesuffix('.service')}%k.service" in rules
 
-    def test_runner_installs_the_unit_that_rules_reference(self):
-        """install-system.sh and apply_profiles must agree on the unit's destination."""
-        installer = (PACKAGING / "install-system.sh").read_text(encoding="utf-8")
-        assert str(SERVICE_PATH) in installer
+    def test_the_installed_unit_is_written_to_the_path_rules_expect(self):
+        """Nothing links the unit's destination and the rules' SYSTEMD_WANTS by name.
+
+        `install-system.sh` used to keep its own copy of these paths; it now renders the
+        same script as the GUI (see tests/test_installer_script.py), so the contract is
+        checked against the renderer output instead of against a hand-written shell file.
+        """
+        from any_pad_to_xbox.core.installer import InstallSources, generate_artifacts
+
+        script = render_install_script(
+            generate_artifacts({"0079:0006": make_profile("0079:0006")}),
+            sources=InstallSources(runner=RUNNER, bridge=BRIDGE, unit=UNIT),
+        )
+        assert str(SERVICE_PATH) in script
+        assert str(RUNNER_PATH) in script
+        assert str(BRIDGE_PATH) in script
 
 
 class TestBridgeRulesAreWellFormed:

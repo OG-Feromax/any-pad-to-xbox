@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pytest
 
 from any_pad_to_xbox.core.profiles import Profile
+
+
+def root_imports(path: Path) -> set[str]:
+    """Top-level module names imported by a file (relative imports ignored)."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and not node.level:
+            names.add((node.module or "").split(".")[0])
+    return {n for n in names if n}
 
 
 def make_profile(
