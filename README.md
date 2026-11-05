@@ -31,6 +31,17 @@ The launcher installs [`uv`](https://docs.astral.sh/uv/) if needed, syncs depend
 
 On first launch, if system integration isn’t installed yet, use **Install (asks for password)** in the UI. That copies the bridge, a small runner, and a systemd unit so a mapped pad can come back as Xbox after unplug/replug.
 
+Every entry point that touches `/etc` renders the same script, so an install is either complete or it fails loudly — no path writes a subset of the files any more:
+
+| you want | command |
+|---|---|
+| normal setup | **Install**, then **Apply** in the GUI |
+| re-apply after a `git pull` | `./scripts/any-pad-to-xbox --reapply` (or GUI **Apply**) |
+| see exactly what root would run | `./scripts/any-pad-to-xbox --print-script` |
+| headless, for packagers | `sudo ./packaging/install-system.sh` |
+
+The two rule files that make up the integration are `/etc/udev/rules.d/99-any-pad-to-xbox.rules` (start the bridge for a mapped pad) and `/etc/udev/rules.d/65-any-pad-to-xbox-hide.rules` (keep that pad out of game controller lists).
+
 ### Pad permissions
 
 If the pad doesn’t show up (or can’t be read), add yourself to the `input` group, then log out and back in:
@@ -47,6 +58,8 @@ An `any-pad-to-xbox-git` PKGBUILD lives under [`packaging/aur/`](packaging/aur/)
 yay -S any-pad-to-xbox-git
 any-pad-to-xbox
 ```
+
+The package places the bridge, runner and systemd unit; the udev rules and `/etc/any-pad-to-xbox/profiles.json` depend on which pads *you* map, so open the app and hit **Install** once, then **Apply**.
 
 See [`docs/AUR.md`](docs/AUR.md) for the maintainer-side publish steps.
 
@@ -100,11 +113,34 @@ Map those axes to the Xbox D-pad. You don’t need analog calibration.
 
 ## Troubleshooting
 
-**Game doesn’t see a controller**  
+**Game doesn’t see a controller**
 Confirm **Virtual Xbox on** / **Active**. Unplug and replug after Enable. On Steam, try disabling Steam Input for that game while testing.
 
-**Password again?**  
+**Game sees a second controller that never responds**
+The bridge grabs the physical pad, so it emits nothing — but grabbing does not stop *enumeration*, and SDL / RetroArch list every device tagged `ID_INPUT_JOYSTICK`. The install writes `65-any-pad-to-xbox-hide.rules` to clear that tag on mapped pads. Confirm it took:
+
+```bash
+udevadm info -q property /dev/input/event20 | grep ID_INPUT
+```
+
+A mapped physical pad should show `ID_INPUT=1` with **no** `ID_INPUT_JOYSTICK` line; the virtual Xbox pad keeps its tag. If the tag is still there, re-**Apply** (the rules on disk may predate your last pull).
+
+Two things to expect after changing those rules:
+
+- Old `/dev/input/by-id/…-joystick` symlinks are not removed by a `--action=change` re-trigger; unplug and replug the pad to clear them.
+- The filter lives in the udev database. RetroArch's **joydev** input driver scans `/dev/input/js*` directly and ignores it, so the silent pad can still show up there — use the **udev** input driver.
+
+**Password again?**
 Expected for Enable / Disable / first Install. Not for clicking buttons on the diagram while mapping.
+
+**Reading the pad while it stays mapped (diagnostics)**
+The bridge grabs the pad exclusively, so the live preview can’t see it. Run with `ANY_PAD_DIAG_NO_GRAB=1` and hit **Apply** to have both read it:
+
+```bash
+ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox
+```
+
+That writes `/etc/any-pad-to-xbox/diag_no_grab`, which makes games see the physical pad again — debugging only. Apply once more without the variable to go back.
 
 **Disable the virtual pad**  
 Use **Disable** in the app.
@@ -128,15 +164,22 @@ Reload systemd/udev after. If you installed from a future AUR package, `sudo pac
 |------|------|
 | `scripts/any-pad-to-xbox` | Dev launcher (`uv`) |
 | `src/any_pad_to_xbox/` | PySide6 UI + core |
+| `src/any_pad_to_xbox/core/udev.py` | udev rule text (bridge + hide) |
+| `src/any_pad_to_xbox/core/installer.py` | renders the one root install script |
 | `packaging/xpad_bridge.py` | Physical → Xbox uinput bridge |
 | `packaging/xboxdrv_runner.py` | Hotplug runner (systemd) |
 | `packaging/aur/` | AUR git package |
 | `assets/` | Xbox diagram + hit regions |
+| `tests/` | pure-logic tests: no root, no pad, no Qt |
 
 ```bash
-./scripts/any-pad-to-xbox
+./scripts/any-pad-to-xbox            # the app
+uv run pytest                        # tests
+./scripts/any-pad-to-xbox --print-script   # the root script, without running it
 sudo ./packaging/install-system.sh   # system bits only
 ```
+
+`packaging/xpad_bridge.py` and `packaging/xboxdrv_runner.py` run under `/usr/bin/python3`, **outside** the venv — they must stay stdlib-only, and `tests/test_packaging_invariants.py` enforces it. Same reason `core/installer.py` imports nothing from PySide6: `install-system.sh` renders as root before any `uv sync` has happened.
 
 ---
 
