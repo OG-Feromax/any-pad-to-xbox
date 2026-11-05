@@ -416,6 +416,53 @@ class TestRiseTally:
         assert lost == 0
 
 
+class TestGrabDetection:
+    """--latency needs to read the physical node, which is impossible under the grab.
+
+    It returned a bare "no samples" instead, indistinguishable from nobody pressing.
+    """
+
+    REAL = (
+        "/usr/bin/python3\0/usr/local/lib/any-pad-to-xbox/xpad_bridge.py\0event20\0"
+        "--profile-json\0{\"name\":\"DragonRise\"}\0"
+    )
+    DIAG = REAL + "--no-grab\0--diag-log\0/tmp/any-pad-bridge.event20.diag\0"
+
+    def test_bridge_holding_the_grab_is_recognised(self, tool):
+        assert tool.parse_bridge_cmdline(self.REAL) == ("event20", True)
+
+    def test_diag_mode_bridge_is_not_holding_the_grab(self, tool):
+        assert tool.parse_bridge_cmdline(self.DIAG) == ("event20", False)
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "bash\0-c\0echo hi\0",
+            "python3\0/usr/local/lib/any-pad-to-xbox/xpad_bridge.py\0--help\0",
+            "",
+        ],
+    )
+    def test_anything_else_is_not_a_bridge(self, tool, cmd):
+        assert tool.parse_bridge_cmdline(cmd) is None
+
+    def test_latency_refuses_with_the_reason_and_the_way_out(
+        self, tool, monkeypatch, tmp_path, capsys
+    ):
+        monkeypatch.setattr(
+            tool,
+            "load_profiles",
+            lambda: {"0079:0006": {"name": "DR", "enabled": True, "evdev_keymap": {}}},
+        )
+        monkeypatch.setattr(
+            tool, "find_physical_nodes", lambda ids: [("0079:0006", Path("/dev/input/event20"))]
+        )
+        monkeypatch.setattr(tool, "grab_state_of", lambda name: True)
+        assert tool.main(["--latency"]) == 2
+        err = capsys.readouterr().err
+        assert "grabbed by the bridge" in err
+        assert "ANY_PAD_DIAG_NO_GRAB=1" in err
+
+
 class TestLatencyPairing:
     """The number he asked for: delay from the physical event to the virtual one."""
 

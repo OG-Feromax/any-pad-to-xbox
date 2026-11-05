@@ -536,14 +536,47 @@ def find_physical_nodes(profile_ids: set[str]) -> list[tuple[str, Path]]:
     ]
 
 
+def parse_bridge_cmdline(cmd: str) -> tuple[str, bool] | None:
+    """(event node, holds_grab) from an xpad_bridge command line, or None.
+
+    The bridge is the thing that owns the physical node while a pad is mapped, and its
+    argv says which node it reads and whether it took the exclusive grab.
+    """
+    args = cmd.split("\0")
+    if not any(arg.endswith("xpad_bridge.py") for arg in args):
+        return None
+    node = next((a for a in args if a.startswith("event")), "")
+    if not node:
+        return None
+    return node, "--no-grab" not in args
+
+
+def grab_state_of(node_name: str) -> bool:
+    """True when something holds an exclusive grab on /dev/input/<node_name>.
+
+    Read from /proc rather than by trying EVIOCGRAB: a probe grab would steal the pad
+    from the running bridge for a moment and drop real presses.
+    """
+    for entry in Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            parsed = parse_bridge_cmdline(entry.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            continue
+        if parsed and parsed[0] == node_name:
+            return parsed[1]
+    return False
+
+
 def measure_latency(seconds: float, device: str | None) -> int:
     """Kernel-timestamp latency from the physical event to the virtual one.
 
     This is the honest end-to-end number for what the bridge sits between: the physical
     stamp is when the kernel received the USB report, the virtual one when uinput injected
     the translated event. So it includes the device's USB polling interval and the kernel
-    input layer — neither of which the bridge can avoid or add to. Pairing needs the pad
-    readable alongside the bridge, i.e. diag mode.
+    input layer — neither of which the bridge can avoid or add to.
+
+    Needs diag mode: while the bridge holds the exclusive grab, every other reader of the
+    physical node gets nothing, and the measurement would silently be one-sided.
     """
     profiles = load_profiles()
     enabled = {k.lower() for k, p in profiles.items() if p.get("enabled", True)}
@@ -555,6 +588,19 @@ def measure_latency(seconds: float, device: str | None) -> int:
         print(
             "no mapped pad found. Pass it explicitly, and run the bridge in diag mode so "
             "the physical node is readable: ANY_PAD_DIAG_NO_GRAB=1, then Enable.",
+            file=sys.stderr,
+        )
+        return 2
+
+    blocked = [node for _ident, node in pads if grab_state_of(node.name)]
+    if blocked:
+        print(
+            f"{' '.join(n.name for n in blocked)} is grabbed by the bridge, so no other "
+            "reader can see it — --latency measures both sides and needs diag mode:\n"
+            "  1. ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox\n"
+            "  2. Enable                        (asks for your password)\n"
+            "  3. ./scripts/mash-check --latency\n"
+            "  4. Enable again without the variable to go back to playing",
             file=sys.stderr,
         )
         return 2
@@ -594,7 +640,15 @@ def measure_latency(seconds: float, device: str | None) -> int:
         print(f"  pressing on {phys_node} now…")
         phys, virt = collect_rises(phys_node, virt_nodes[0], seconds, axis_codes)
         deltas, lost = pair_latencies(phys, virt, pairs)
+        # Say what was seen before saying what it means: "no samples" alone cannot tell
+        # nobody-pressed apart from one-sided-visibility or an empty mapping.
+        print(
+            f"  saw {len(phys)} physical rise(s), {len(virt)} virtual press(es), "
+            f"{len(pairs)} mapped control(s)"
+        )
         print(f"{phys_node} → {virt_nodes[0]}  {stats(deltas)}")
+        if not deltas and virt and not phys:
+            print("  nothing arrived on the physical side while the virtual side did")
         if lost:
             print(f"  {lost} physical press(es) never came out as a virtual press")
         all_deltas += deltas

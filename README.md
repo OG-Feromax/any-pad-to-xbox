@@ -145,9 +145,10 @@ which maps directions to keys and therefore gets edge recovery.
 ```
 
 `--latency` compares **kernel timestamps**: the physical event when the kernel received the
-USB report, the virtual one when uinput injected the translation. Needs diag mode, since the
-bridge's exclusive grab otherwise hides the physical side. That number is the kernel + bridge
-hop only — expect well under a millisecond. The rest of the chain is not the bridge's:
+USB report, the virtual one when uinput injected the translation. It needs diag mode, and
+says so rather than returning "no samples" — while the bridge holds the exclusive grab, no
+other reader sees the physical node at all. The number it gives is the kernel + bridge hop
+only; expect well under a millisecond. The rest of the chain is not the bridge's:
 
 | stage | typical | how to see it |
 |---|---|---|
