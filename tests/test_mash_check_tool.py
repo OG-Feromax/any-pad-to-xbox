@@ -136,36 +136,79 @@ class TestPressTally:
         assert list(downs) == [304]
 
 
+def phys_downs(tool, bridge, lines) -> int:
+    """Count physical presses in a set of log lines (the data layer, not the printout)."""
+    return sum(tool.count_downs(bridge, lines)[0].values())
+
+
+DIAG_PROFILES = {
+    "0079:0006": {
+        "name": "DragonRise",
+        "evdev_keymap": {"BTN_THUMB": "a", "BTN_TOP": "x", "BTN_BASE2": "b"},
+        "evdev_absmap": {"ABS_Y": "dpad_y"},
+    },
+    # A second pad whose BTN_0 lands on the same virtual code 305 as the first pad's
+    # BTN_BASE2. Reports must not mix the two.
+    "1b4f:9206": {"name": "SparkFun", "evdev_keymap": {"BTN_0": "b"}, "evdev_absmap": {}},
+}
+
+
+@pytest.fixture(scope="module")
+def bridge(tool):
+    return tool.load_bridge_module()
+
+
+@pytest.fixture
+def system(tool, monkeypatch, tmp_path):
+    """A /tmp-like dir with one attributed diag log and the profiles behind it."""
+    profiles = tmp_path / "profiles.json"
+    profiles.write_text(
+        json.dumps({"version": 1, "profiles": DIAG_PROFILES}), encoding="utf-8"
+    )
+    monkeypatch.setattr(tool, "SYSTEM_PROFILES", profiles)
+    monkeypatch.setattr(tool, "USER_PROFILES", tmp_path / "absent.json")
+    monkeypatch.setattr(tool, "DIAG_DIR", tmp_path)
+    monkeypatch.setattr(tool, "DIAG_LEGACY", tmp_path / "legacy.diag")
+    monkeypatch.setattr(tool, "pad_id", lambda node: "0079:0006" if node == "event20" else None)
+    return tmp_path
+
+
+class TestWindowing:
+    """--diag must measure the countdown, not everything the bridge already logged."""
+
+    def test_offset_keeps_only_what_arrived_after_it(self, tool, tmp_path, bridge):
+        path = tmp_path / "any-pad-bridge.event20.diag"
+        path.write_text("1.0 BRIDGE start pid=1\n", encoding="utf-8")
+        with path.open("a", encoding="utf-8") as handle:
+            for i in range(4):
+                handle.write(f"1.{i} PHYS KEY BTN_THUMB down\n")
+        mark = path.stat().st_size
+        with path.open("a", encoding="utf-8") as handle:
+            for i in range(3):
+                handle.write(f"2.{i} PHYS KEY BTN_THUMB down\n")
+
+        before, _ = tool.read_since(path, mark, 10)
+        whole, _ = tool.read_since(path, None, 10)
+        assert phys_downs(tool, bridge, before) == 3
+        assert phys_downs(tool, bridge, whole) == 7
+
+    def test_scope_says_so(self, tool, tmp_path, bridge):
+        path = tmp_path / "any-pad-bridge.event20.diag"
+        path.write_text("1.0 BRIDGE start pid=1\n1.0 PHYS KEY BTN_THUMB down\n", encoding="utf-8")
+        assert tool.read_since(path, path.stat().st_size, 10)[1] == "the last 10s only"
+        assert tool.read_since(path, None)[1] == "the whole session"
+
+    def test_a_truncated_log_is_not_read_as_silence(self, tool, tmp_path, bridge):
+        """The bridge reopens mode 'w' on start, so the old mark can be past EOF."""
+        path = tmp_path / "any-pad-bridge.event20.diag"
+        path.write_text("1.0 BRIDGE start pid=1\n1.0 PHYS KEY BTN_THUMB down\n", encoding="utf-8")
+        lines, scope = tool.read_since(path, 10_000)
+        assert "restarted" in scope
+        assert phys_downs(tool, bridge, lines) == 1
+
+
 class TestDiagDiff:
     """Per-pad PHYS-vs-virtual equivalence, joined on code numbers, scoped to one profile."""
-
-    PROFILE = {
-        "0079:0006": {
-            "name": "DragonRise",
-            "evdev_keymap": {"BTN_THUMB": "a", "BTN_TOP": "x", "BTN_BASE2": "b"},
-            "evdev_absmap": {"ABS_Y": "dpad_y"},
-        },
-        # A second pad that shares the virtual code 305 for a different physical button.
-        # Reports must not mix the two.
-        "1b4f:9206": {"name": "SparkFun", "evdev_keymap": {"BTN_0": "b"}, "evdev_absmap": {}},
-    }
-
-    @pytest.fixture
-    def bridge(self, tool):
-        return tool.load_bridge_module()
-
-    @pytest.fixture
-    def system(self, tool, monkeypatch, tmp_path):
-        """A /tmp-like dir with one attributed diag log and the profiles behind it."""
-        profiles = tmp_path / "profiles.json"
-        profiles.write_text(json.dumps({"version": 1, "profiles": self.PROFILE}), encoding="utf-8")
-        monkeypatch.setattr(tool, "SYSTEM_PROFILES", profiles)
-        monkeypatch.setattr(tool, "USER_PROFILES", tmp_path / "absent.json")
-        monkeypatch.setattr(tool, "DIAG_DIR", tmp_path)
-        monkeypatch.setattr(tool, "DIAG_LEGACY", tmp_path / "legacy.diag")
-        monkeypatch.setattr(tool, "pad_id", lambda node: "0079:0006" if node == "event20" else None)
-        diag_dir = tmp_path
-        return diag_dir
 
     def log_for(self, tool, tmp_path, bridge, presses, emitted, pulse=0, pad="0079:0006"):
         """Build a log using the bridge's own name tables — the point of these tests."""
@@ -284,7 +327,7 @@ class TestDiagDiff:
     def test_log_without_presses_says_so(self, tool, system, tmp_path, bridge, capsys):
         path = self.log_for(tool, tmp_path, bridge, presses=0, emitted=0)
         assert tool.report_pad("event20", path, bridge) == 0
-        assert "no PHYS KEY lines" in capsys.readouterr().out
+        assert "no press arrived during" in capsys.readouterr().out
 
     def test_stale_log_is_warned_about(self, tool, system, tmp_path, bridge, capsys):
         path = self.log_for(tool, tmp_path, bridge, presses=1, emitted=1)

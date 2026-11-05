@@ -10,7 +10,10 @@ Two modes, neither needing root:
 Both *wait for you*. Nothing is measured by pressing keys while a report command runs
 afterwards: the second mode reads `/tmp/any-pad-bridge.*.diag`, which the bridge writes
 continuously while it runs without its exclusive grab, so the mashing has to happen in
-that state. The full sequence for the strict test is:
+that state. And `--diag` counts only the bytes logged during its own countdown, so an
+earlier mash cannot be mistaken for the one you are testing.
+
+The full sequence for the strict test is:
 
   1. ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox
   2. select the pad, click Enable                     (asks for your password)
@@ -348,22 +351,50 @@ def choose_profile(
     return None, f"no profile for {ident}" if ident else f"{len(candidates)} profiles fit"
 
 
-def report_pad(node: str, path: Path, bridge) -> int:
+def read_since(path: Path, offset: int | None, window: float = 0) -> tuple[list[str], str]:
+    """(lines to count, scope label). An offset means "only what arrived after it".
+
+    Without this the sleep in --diag is theatre: the file already holds every press since
+    the bridge started, so counting it all reports an earlier mash as if it were the one
+    the user just did.
+    """
+    size = path.stat().st_size
+    if offset is None:
+        return path.read_text(encoding="utf-8").splitlines(), "the whole session"
+    if size < offset:
+        # The bridge restarted mid-window and reopened the log with mode "w".
+        return path.read_text(encoding="utf-8").splitlines(), "the whole session (restarted)"
+    with path.open(encoding="utf-8") as handle:
+        handle.seek(offset)
+        tail = handle.read()
+    return tail.splitlines(), f"the last {window:.0f}s only"
+
+
+def report_pad(node: str, path: Path, bridge, offset: int | None = None, window: float = 0) -> int:
     """One pad's PHYS-vs-virtual equivalence. Returns the number of unaccounted presses."""
-    lines = path.read_text(encoding="utf-8").splitlines()
-    header = next((line for line in lines if "BRIDGE start" in line), "(no BRIDGE start line)")
+    lines, scope = read_since(path, offset, window)
+    header = next((line for line in lines if "BRIDGE start" in line), "")
+    if not header:
+        # The window began after the bridge started, so the header is behind the offset.
+        header = next(
+            (line for line in path.read_text(encoding="utf-8").splitlines() if "BRIDGE start" in line),
+            "(no BRIDGE start line)",
+        )
     age = time.time() - path.stat().st_mtime
     ident = pad_id(node)
     label = f"/dev/input/{node}" if node else "(legacy log path)"
-    print(f"\n{label}{' [' + ident + ']' if ident else ''}\n  session: {header}")
+    print(f"\n{label}{' [' + ident + ']' if ident else ''}\n  counting {scope}\n  session: {header or '(started before this window)'}")
     if age > 120:
-        print(f"  WARNING: log is {age / 60:.0f} min old — not your current mash.")
+        print("  WARNING: log has not been written for 2 minutes — the bridge may be idle.")
 
     phys, virt, unknown = count_downs(bridge, lines)
     if unknown:
         print("  code names this tool could not resolve: " + ", ".join(sorted(unknown)))
     if not phys:
-        print("  no PHYS KEY lines in this log — mash the pad, then run --diag again.")
+        print(
+            f"  no press arrived during {scope} — mash while it counts, or use --now"
+            " to report the whole session."
+        )
         return 0
 
     profiles = load_profiles()
@@ -430,10 +461,23 @@ def diag_run(seconds: float, wait: bool = True) -> int:
         return 2
 
     if wait:
-        print(f"Mash now: watching {seconds:.0f}s across {len(logs)} pad(s), then reporting.")
+        # Mark where each log currently ends: only bytes written after this point belong
+        # to the mash the user is about to do.
+        marks = {node: path.stat().st_size for node, path in logs}
+        print(f"Mash now: counting {seconds:.0f}s across {len(logs)} pad(s), then reporting.")
         time.sleep(seconds)
+    else:
+        marks = {}
 
-    return 0 if sum(report_pad(node, path, bridge) for node, path in logs) == 0 else 1
+    return (
+        0
+        if sum(
+            report_pad(node, path, bridge, offset=marks.get(node), window=seconds)
+            for node, path in logs
+        )
+        == 0
+        else 1
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -442,10 +486,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--diag",
         action="store_true",
-        help="wait --seconds while you mash, then diff PHYS in vs virtual out, per pad",
+        help="wait --seconds while you mash, then diff in vs out for that window only",
     )
     parser.add_argument(
-        "--now", action="store_true", help="with --diag: report the log as it stands, no wait"
+        "--now", action="store_true", help="with --diag: report the whole session, no wait"
     )
     parser.add_argument("--list", action="store_true", help="show the virtual pad nodes found")
     parser.add_argument("device", nargs="*", help="explicit /dev/input/eventN to watch")

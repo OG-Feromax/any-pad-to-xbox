@@ -156,12 +156,14 @@ ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox   # 1. start the app in diag mo
 # 4. Enable again without the variable to go back
 ```
 
-`--diag` reads `/tmp/any-pad-bridge.<event>.diag` — one file per mapped pad, since two
-bridges writing the same path would truncate each other. It joins the two sides on code
-numbers (a physical `BTN_THUMB` is a virtual `BTN_A`) and scopes itself to the profile of
-the pad that wrote the log; mixing in other pads' buttons invents losses that never
-happened. Axis-mapped directions are declared out of scope rather than skipped silently,
-and `--now` reports the log as it stands without waiting.
+`--diag` reads `/tmp/any-pad-bridge.<event>.diag` and counts **only what arrived during its
+own countdown** — presses from before you ran it belong to an earlier test, and the report
+says which scope it used (`--now` deliberately means "the whole session"). One file per
+mapped pad, since two bridges writing the same path would truncate each other. It joins the
+two sides on code numbers (a physical `BTN_THUMB` is a virtual `BTN_A`) and scopes itself to
+the profile of the pad that wrote the log; mixing in other pads' buttons invents losses that
+never happened. A button mapped to `lt`/`rt` leaves the bridge as an axis ramp and is counted
+as such. Axis-mapped directions are declared out of scope rather than skipped silently.
 
 ---
 
