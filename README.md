@@ -111,6 +111,52 @@ A lot of cab hardware (optical gates on a stick, DragonRise USB boards, etc.) is
 
 Map those axes to the Xbox D-pad. You don’t need analog calibration.
 
+## Mashing: what is guaranteed
+
+Under mash a cheap encoder loses the “up” edge, and a game that polls state then sees one
+held button instead of two presses. The bridge recovers that edge: a second down while the
+button is already down is emitted as **up + SYN + down** (`xpad_bridge.py:325`). The SYN
+between them is mandatory — a `0→1` inside the same report is invisible to state pollers.
+
+Measured behaviour (`tests/test_mash_equivalence.py`):
+
+| situation | result |
+|---|---|
+| presses with their real ups, any rate | **lossless** — 200 cycles in 1 s all come out |
+| ups lost, presses ≥ 13 ms apart | **lossless**, one pulse each |
+| ups lost, presses < 12 ms apart | treated as USB bounce and dropped (debounce window) |
+| ups lost at 120/s | degrades by halving: ~60 presses/s survive |
+| kernel autorepeat (`value == 2`) | ignored, not a press |
+
+The 12 ms window is what makes a held button immune to bounce, so it is a deliberate
+limit, not an oversight — and 83 presses/s on one button is beyond anything a hand does.
+
+D-pad directions mapped from an analog axis are **level** state and are never pulsed: many
+encoders re-send the same value while a direction is held, and pulsing that would make
+every hold look like mash. For tap-dpad use `--dpad-as-button` (the SparkFun profile),
+which maps directions to keys and therefore gets edge recovery.
+
+### Measuring it on your own pad
+
+```bash
+./scripts/mash-check --seconds 10     # mash now; counts what the game receives
+```
+
+That watches the virtual pad (no root) and prints presses per button, presses/s, the
+fastest gap, and anything left stuck down. For the strict side-by-side count:
+
+```bash
+ANY_PAD_DIAG_NO_GRAB=1 ./scripts/any-pad-to-xbox    # then Apply
+./scripts/mash-check --seconds 10                   # mash
+./scripts/mash-check --diag                         # PHYS in vs virtual out, per button
+```
+
+`--diag` reads `/tmp/any-pad-bridge.diag`, which only exists in diag mode — the one mode
+where the physical pad can be observed independently, since the bridge normally holds an
+exclusive grab on it. It joins the two sides on code numbers (a physical `BTN_THUMB` is a
+virtual `BTN_A`), and axis-mapped directions are declared out of scope rather than
+silently skipped.
+
 ---
 
 ## Troubleshooting
@@ -179,6 +225,7 @@ Reload systemd/udev after. If you installed from a future AUR package, `sudo pac
 ```bash
 ./scripts/any-pad-to-xbox            # the app
 uv run pytest                        # tests
+./scripts/mash-check --seconds 10    # measure press fidelity on your pad
 ./scripts/any-pad-to-xbox --print-script   # the root script, without running it
 sudo ./packaging/install-system.sh   # system bits only
 ```
