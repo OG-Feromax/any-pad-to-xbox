@@ -207,7 +207,30 @@ Two things this does **not** hide, and why:
 - **Tools that scan device nodes instead of asking udev** — `jstest-gtk`, `antimicrox`, RetroArch's **joydev** input driver. The kernel still creates a `js` node for the grabbed pad, and those tools open `/dev/input/js*` by directory listing, so the pad appears. It is inert (the bridge holds the events). Use the **udev** input driver in RetroArch; don't trust `jstest-gtk` as a check for this feature.
 - **`/dev/input/by-id/…-joystick` symlinks** on the physical pad. udev applies rules in lexical order, and the system's own `60-persistent-input.rules` creates that symlink from `ID_INPUT_JOYSTICK` *before* our `65-*` file clears the tag — so the symlink is made on every plug, replug included. It's a name, not an enumeration signal; games that filter by the property never see it.
 
-One pad, one grabber: another remapper running at the same time (antimicrox, a Steam Input rebind, …) competes for the physical device. Only the last `EVIOCGRAB` wins, so check with `fuser -v /dev/input/eventN` before chasing a pad that went silent.
+One pad, one grabber — and **the first one wins**. Tested on a live node: a second
+`EVIOCGRAB` fails with `EBUSY`, it does not take over. The bridge retries for 1.5 s and then
+gives up, so if something else grabbed the pad first (antimicrox, another remapper) the
+bridge dies and the pad never becomes an Xbox controller:
+
+```bash
+systemctl status "xboxdrv@event20.service"        # failed?
+grep -i "busy\|error" /var/log/any-pad-to-xbox.log | tail
+fuser -v /dev/input/event20                        # who else has it open
+```
+
+Fix by closing the other remapper, not by replugging.
+
+**Pad stopped working and you edited `profiles.json` by hand**
+The bridge refuses an unusable mapping instead of half-mapping the pad, and names every
+bad entry:
+
+```bash
+grep -i "cannot be bridged" /var/log/any-pad-to-xbox.log
+```
+
+Expect something like `profile 'DragonRise Fliperama' cannot be bridged: evdev_keymap
+'BTN_FAKEO' is not a known input code name`. It fails before the device is opened, so the
+pad is never left grabbed-and-dead. Either fix the name or map it again in the app.
 
 **Password again?**
 Expected for Enable / Disable / first Install. Not for clicking buttons on the diagram while mapping.

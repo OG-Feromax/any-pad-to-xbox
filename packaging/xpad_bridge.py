@@ -526,6 +526,42 @@ class BridgeDiag:
             pass
 
 
+def build_maps(profile: dict[str, Any]) -> tuple[dict[int, str], dict[int, str]]:
+    """Resolve a profile's evdev names into (key map, axis map).
+
+    `/etc/any-pad-to-xbox/profiles.json` is a plain file a person can edit, and
+    `resolve_code` raises on a name the table does not know. Skipping such an entry would
+    leave individual buttons silently dead forever; letting the exception escape would
+    kill the pad during hotplug with a traceback that never says which entry was wrong.
+    So this collects every unusable entry and refuses the whole profile, naming each one.
+
+    An unknown *target* (the Xbox-side name) is rejected for the same reason: the emit
+    path looks targets up in tables and would otherwise drop those presses quietly.
+    """
+    key_map: dict[int, str] = {}
+    abs_map: dict[int, str] = {}
+    bad: list[str] = []
+    for source, target_map in (("evdev_keymap", key_map), ("evdev_absmap", abs_map)):
+        for name, xbox in (profile.get(source) or {}).items():
+            try:
+                code = resolve_code(name)
+            except KeyError:
+                bad.append(f"{source} {name!r} is not a known input code name")
+                continue
+            if xbox not in XBOX_BTN_CODES and xbox not in XBOX_ABS_CODES:
+                bad.append(f"{source} {name!r} -> {xbox!r} is not a known Xbox control")
+                continue
+            target_map[code] = xbox
+    if bad:
+        raise ValueError(
+            "profile "
+            + repr(profile.get("name", "?"))
+            + " cannot be bridged: "
+            + "; ".join(bad)
+        )
+    return key_map, abs_map
+
+
 class Bridge:
     def __init__(
         self,
@@ -539,12 +575,7 @@ class Bridge:
         self.diag = diag
         self.trigger_as_button, self.dpad_as_button = profile_flags(list(profile.get("extra_opts") or []))
         self.invert = parse_axismap(list(profile.get("axismap") or []))
-        self.key_map: dict[int, str] = {}
-        for name, xbox in (profile.get("evdev_keymap") or {}).items():
-            self.key_map[resolve_code(name)] = xbox
-        self.abs_map: dict[int, str] = {}
-        for name, xbox in (profile.get("evdev_absmap") or {}).items():
-            self.abs_map[resolve_code(name)] = xbox
+        self.key_map, self.abs_map = build_maps(profile)
         # Cached hat / dpad button state for composite updates
         self._hat_x = 0
         self._hat_y = 0
@@ -722,6 +753,13 @@ def run_bridge(
     if not os.path.exists(path):
         print(f"missing device {path}", file=sys.stderr)
         return 1
+    try:
+        build_maps(profile)
+    except ValueError as exc:
+        # Before opening anything: refuse with the offending entry named, rather than a
+        # traceback after the pad is already grabbed.
+        print(f"xpad_bridge: {exc}", file=sys.stderr)
+        return 2
     trigger_as_button, dpad_as_button = profile_flags(list(profile.get("extra_opts") or []))
     phys = PhysicalDevice(path, grab=grab)
     ui = UInputXbox(trigger_as_button=trigger_as_button, dpad_as_button=dpad_as_button)

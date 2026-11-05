@@ -22,6 +22,17 @@ BRIDGE_CANDIDATES = [
 ]
 
 
+def diag_log_path(event: str) -> Path:
+    """Where the bridge's ground-truth log goes for one pad.
+
+    Per event node because the bridge opens it with mode "w": two mapped pads sharing one
+    path truncate each other's session. The node is encoded in the name, and
+    scripts/mash-check parses it back out to attribute a log to a profile — a test checks
+    the two agree, since writer and reader live in different files.
+    """
+    return BRIDGE_DIAG_LOG.with_name(f"{BRIDGE_DIAG_LOG.stem}.{event}{BRIDGE_DIAG_LOG.suffix}")
+
+
 def log(msg: str) -> None:
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n"
     try:
@@ -112,13 +123,11 @@ def main() -> int:
         json.dumps(profile, separators=(",", ":")),
     ]
     # Test-phase / explicit flag: allow PHYS+VIRT dual read for latency logs.
-    # One file per event node: with two pads mapped, both bridges would open the same
-    # path with mode "w" and truncate each other's session.
     if DIAG_NO_GRAB_FLAG.exists():
-        diag_path = BRIDGE_DIAG_LOG.with_name(f"{BRIDGE_DIAG_LOG.stem}.{event}{BRIDGE_DIAG_LOG.suffix}")
+        path = diag_log_path(event)
         argv.append("--no-grab")
-        argv.extend(["--diag-log", str(diag_path)])
-        log(f"diag: --no-grab + --diag-log {diag_path}")
+        argv.extend(["--diag-log", str(path)])
+        log(f"diag: --no-grab + --diag-log {path}")
     log(
         "exec: "
         + " ".join(argv[:3])

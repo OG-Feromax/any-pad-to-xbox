@@ -460,6 +460,39 @@ class TestLatencyPairing:
         assert "ANY_PAD_DIAG_NO_GRAB=1" in capsys.readouterr().err
 
 
+@pytest.fixture(scope="module")
+def runner():
+    path = REPO_ROOT / "packaging" / "xboxdrv_runner.py"
+    loader = importlib.machinery.SourceFileLoader("xboxdrv_runner_under_test", str(path))
+    spec = importlib.util.spec_from_loader("xboxdrv_runner_under_test", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+class TestDiagLogNamingContract:
+    """The runner writes the filename; this tool parses the node back out of it.
+
+    Writer and reader live in different files, so a rename on one side silently breaks
+    attribution on the other — exactly the kind of drift this repo had today.
+    """
+
+    @pytest.mark.parametrize("node", ["event20", "event0", "event128"])
+    def test_written_name_is_discoverable(self, tool, runner, tmp_path, node):
+        written = runner.diag_log_path(node)
+        assert written.parent == runner.BRIDGE_DIAG_LOG.parent, "must stay in /tmp"
+        target = tmp_path / written.name
+        target.write_text("1.0 BRIDGE start pid=1\n", encoding="utf-8")
+        assert tool.diag_logs(tmp_path) == [(node, target)]
+
+    def test_two_pads_get_two_different_files(self, runner):
+        """Same path with mode 'w' would make the second bridge truncate the first."""
+        assert runner.diag_log_path("event20") != runner.diag_log_path("event21")
+
+    def test_name_still_ends_in_diag(self, runner):
+        assert runner.diag_log_path("event20").suffix == ".diag"
+
+
 class TestStuckDetection:
     def test_a_button_left_down_is_reported(self, tool, capsys):
         tool._report({304: [1.0, 2.0]}, {304}, 10.0)
